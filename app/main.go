@@ -6,8 +6,8 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 
+	"github.com/codecrafters-io/redis-starter-go/redis"
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
 )
 
@@ -22,6 +22,8 @@ func main() {
 		os.Exit(1)
 	}
 	conns := make(chan net.Conn)
+
+	controller := redis.NewController()
 	go func() {
 		for {
 			conn, err := l.Accept()
@@ -33,11 +35,11 @@ func main() {
 		}
 	}()
 	for conn := range conns {
-		go handleConnection(conn)
+		go handleConnection(controller, conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(controller *redis.Controller, conn net.Conn) {
 	defer conn.Close()
 
 	parser := resp.Parser{}
@@ -60,24 +62,11 @@ func handleConnection(conn net.Conn) {
 		}
 		switch data := cmd.Data.(type) {
 		case resp.ArraysData:
-			if data.Datas[0].Type == resp.TypeBulkString {
-				cmdData := data.Datas[0].Data.(resp.BulkStringData)
-				switch cmd := strings.ToUpper(cmdData.Data); cmd {
-				case "ECHO":
-
-					_, err := conn.Write([]byte(data.Datas[1].String()))
-					if err != nil {
-						fmt.Println("failed to write to conn", err)
-						return
-					}
-				case "PING":
-					pongData := resp.SimpleStringData{Data: "PONG"}
-					_, err := conn.Write([]byte(pongData.String()))
-					if err != nil {
-						fmt.Println("failed to write to conn", err)
-						return
-					}
-				}
+			resp := controller.Handle(data)
+			_, err := conn.Write([]byte(resp.String()))
+			if err != nil {
+				fmt.Println("failed to write to conn", err)
+				return
 			}
 		default:
 			fmt.Println("unsupported")
