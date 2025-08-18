@@ -3,7 +3,6 @@ package resp
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -12,12 +11,8 @@ import (
 
 type Parser struct{}
 
-type GeneralData struct {
-	Data
-}
-
 // ParseSequence parse from array of data, and get out list of Datas
-func (p Parser) ParseNext(data []byte) (*GeneralData, int, error) {
+func (p Parser) ParseNext(data []byte) (Data, int, error) {
 	if len(data) == 0 {
 		return nil, -1, errors.New("data must not be nil")
 	}
@@ -35,23 +30,7 @@ func (p Parser) ParseNext(data []byte) (*GeneralData, int, error) {
 	}
 }
 
-type Data interface {
-	String() string
-	RawString() string
-}
-type SimpleStringData struct {
-	Data string
-}
-
-func (d SimpleStringData) String() string {
-	return fmt.Sprintf("%s%s%s", string(TypeSimpleString), d.Data, Terminator)
-}
-
-func (d SimpleStringData) RawString() string {
-	return strconv.Quote(d.String())
-}
-
-func (p Parser) ParseSimpleStrings(input []byte) (*GeneralData, int, error) {
+func (p Parser) ParseSimpleStrings(input []byte) (Data, int, error) {
 	utils.Assert(DataType(input[0]) == TypeSimpleString, "first byte must be simpleString indicator")
 
 	dataStartIdx := 1
@@ -61,38 +40,13 @@ func (p Parser) ParseSimpleStrings(input []byte) (*GeneralData, int, error) {
 	data := input[dataStartIdx:dataEndIdx]
 
 	nextIdx := dataEndIdx + len(string(Terminator))
-	return &GeneralData{
-		Data: SimpleStringData{
-			Data: string(data),
-		},
+	return SimpleStringData{
+		Data: string(data),
 	}, nextIdx, nil
 }
 
-type NullBulkStringData struct{}
-
-func (d NullBulkStringData) String() string {
-	return fmt.Sprintf("%s-1%s", string(TypeBulkString), Terminator)
-}
-
-func (d NullBulkStringData) RawString() string {
-	return strconv.Quote(d.String())
-}
-
-type BulkStringData struct {
-	Length int
-	Data   string
-}
-
-func (d BulkStringData) String() string {
-	return fmt.Sprintf("%s%d%s%s%s", string(TypeBulkString), d.Length, Terminator, d.Data, Terminator)
-}
-
-func (d BulkStringData) RawString() string {
-	return strconv.Quote(d.String())
-}
-
 // $<length>\r\n<data>\r\n
-func (p Parser) ParseBulkStrings(input []byte) (*GeneralData, int, error) {
+func (p Parser) ParseBulkStrings(input []byte) (Data, int, error) {
 	utils.Assert(DataType(input[0]) == TypeBulkString, "first byte must be bulkStrings indicator")
 	respStartIdx := 1
 	respEndIdx := strings.Index(string(input), string(Terminator))
@@ -105,9 +59,7 @@ func (p Parser) ParseBulkStrings(input []byte) (*GeneralData, int, error) {
 	if respLength == -1 {
 		nextIdx := respEndIdx + len(string(Terminator))
 		// NULL bulkString
-		return &GeneralData{
-			Data: NullBulkStringData{},
-		}, nextIdx, nil
+		return NullBulkStringData{}, nextIdx, nil
 	}
 
 	dataStartIdx := respEndIdx + len(string(Terminator))
@@ -115,34 +67,13 @@ func (p Parser) ParseBulkStrings(input []byte) (*GeneralData, int, error) {
 	data := input[dataStartIdx:dataEndIdx]
 
 	nextIdx := dataEndIdx + len(string(Terminator))
-	return &GeneralData{
-		Data: BulkStringData{
-			Length: respLength,
-			Data:   string(data),
-		},
+	return BulkStringData{
+		Length: respLength,
+		Data:   string(data),
 	}, nextIdx, nil
 }
 
-type ArraysData struct {
-	Length int
-	Datas  []GeneralData
-}
-
-func (d ArraysData) String() string {
-	builder := new(strings.Builder)
-	builder.WriteByte(byte(TypeArrays))
-	fmt.Fprintf(builder, "%d%s", d.Length, string(Terminator))
-	for ele := range slices.Values(d.Datas) {
-		builder.WriteString(ele.String())
-	}
-	return builder.String()
-}
-
-func (d ArraysData) RawString() string {
-	return strconv.Quote(d.String())
-}
-
-func (p Parser) ParseArrays(input []byte) (*GeneralData, int, error) {
+func (p Parser) ParseArrays(input []byte) (Data, int, error) {
 	utils.Assert(DataType(input[0]) == TypeArrays, "first byte must be arrays indicator")
 	elesNumStartIndex := 1
 	elesNumEndIndex := strings.Index(string(input), Terminator)
@@ -153,11 +84,11 @@ func (p Parser) ParseArrays(input []byte) (*GeneralData, int, error) {
 		return nil, -1, fmt.Errorf("invalid number of elements: %v", err)
 	}
 
-	datas := make([]GeneralData, elesNum)
+	datas := make([]Data, elesNum)
 
 	nextIdx := elesNumEndIndex + len(string(Terminator))
 
-	var data *GeneralData
+	var data Data
 	for i := range elesNum {
 		utils.Assert(nextIdx < len(input), "something wrong with next index")
 		input = input[nextIdx:]
@@ -166,13 +97,11 @@ func (p Parser) ParseArrays(input []byte) (*GeneralData, int, error) {
 			return nil, -1, err
 		}
 
-		datas[i] = *data
+		datas[i] = data
 	}
 
-	return &GeneralData{
-		Data: ArraysData{
-			Length: elesNum,
-			Datas:  datas,
-		},
+	return ArraysData{
+		Length: elesNum,
+		Datas:  datas,
 	}, nextIdx, nil
 }

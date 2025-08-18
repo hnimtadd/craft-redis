@@ -60,7 +60,7 @@ func handleConnection(controller *redis.Controller, conn net.Conn) {
 			fmt.Println("failed to get data:", err)
 			continue
 		}
-		switch data := cmd.Data.(type) {
+		switch data := cmd.(type) {
 		case resp.ArraysData:
 			resp := controller.Handle(data)
 			_, err := conn.Write([]byte(resp.String()))
