@@ -4,6 +4,7 @@ const (
 	Terminator = "\r\n"
 )
 
+// RESP3 compatible datatype
 type DataType byte
 
 const (
@@ -11,6 +12,7 @@ const (
 	TypeSimpleError     DataType = '-'
 	TypeIntegers        DataType = ':'
 	TypeBulkString      DataType = '$'
+	TypeNullBulkString  DataType = '$'
 	TypeArrays          DataType = '*'
 	TypeNulls           DataType = '_'
 	TypeBooleans        DataType = '#'

@@ -27,7 +27,6 @@ func TestParserSimpleString(t *testing.T) {
 			parser := Parser{}
 			data, _, err := parser.ParseSimpleStrings(tc.input)
 			assert.Equal(t, tc.expectedError, err != nil)
-			assert.Equal(t, TypeSimpleString, data.Type)
 			assert.EqualValues(t, data.Data, tc.expectedData)
 			assert.Equal(t, string(tc.input), data.String())
 		})
@@ -58,11 +57,9 @@ func TestParserArrays(t *testing.T) {
 				Length: 2,
 				Datas: []GeneralData{
 					{
-						Type: TypeBulkString,
 						Data: BulkStringData{Length: 5, Data: "hello"},
 					},
 					{
-						Type: TypeBulkString,
 						Data: BulkStringData{Length: 5, Data: "world"},
 					},
 				},
@@ -76,11 +73,9 @@ func TestParserArrays(t *testing.T) {
 				Length: 2,
 				Datas: []GeneralData{
 					{
-						Type: TypeBulkString,
 						Data: BulkStringData{Length: 4, Data: "ECHO"},
 					},
 					{
-						Type: TypeBulkString,
 						Data: BulkStringData{Length: 6, Data: "banana"},
 					},
 				},
@@ -95,11 +90,9 @@ func TestParserArrays(t *testing.T) {
 				Length: 2,
 				Datas: []GeneralData{
 					{
-						Type: TypeBulkString,
 						Data: BulkStringData{Length: 4, Data: "ECHO"},
 					},
 					{
-						Type: TypeBulkString,
 						Data: BulkStringData{Length: 3, Data: "hey"},
 					},
 				},
@@ -118,7 +111,6 @@ func TestParserArrays(t *testing.T) {
 			}
 			if tc.expectedData != nil {
 				assert.NotNil(t, data)
-				assert.Equal(t, TypeArrays, data.Type)
 				assert.EqualValues(t, data.Data, *tc.expectedData)
 				assert.Equal(t, string(tc.input), data.String())
 			}

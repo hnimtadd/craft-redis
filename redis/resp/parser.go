@@ -13,7 +13,6 @@ import (
 type Parser struct{}
 
 type GeneralData struct {
-	Type DataType
 	Data
 }
 
@@ -38,14 +37,18 @@ func (p Parser) ParseNext(data []byte) (*GeneralData, int, error) {
 
 type Data interface {
 	String() string
+	RawString() string
 }
-
 type SimpleStringData struct {
 	Data string
 }
 
 func (d SimpleStringData) String() string {
 	return fmt.Sprintf("%s%s%s", string(TypeSimpleString), d.Data, Terminator)
+}
+
+func (d SimpleStringData) RawString() string {
+	return strconv.Quote(d.String())
 }
 
 func (p Parser) ParseSimpleStrings(input []byte) (*GeneralData, int, error) {
@@ -59,11 +62,20 @@ func (p Parser) ParseSimpleStrings(input []byte) (*GeneralData, int, error) {
 
 	nextIdx := dataEndIdx + len(string(Terminator))
 	return &GeneralData{
-		Type: TypeSimpleString,
 		Data: SimpleStringData{
 			Data: string(data),
 		},
 	}, nextIdx, nil
+}
+
+type NullBulkStringData struct{}
+
+func (d NullBulkStringData) String() string {
+	return fmt.Sprintf("%s-1%s", string(TypeBulkString), Terminator)
+}
+
+func (d NullBulkStringData) RawString() string {
+	return strconv.Quote(d.String())
 }
 
 type BulkStringData struct {
@@ -73,6 +85,10 @@ type BulkStringData struct {
 
 func (d BulkStringData) String() string {
 	return fmt.Sprintf("%s%d%s%s%s", string(TypeBulkString), d.Length, Terminator, d.Data, Terminator)
+}
+
+func (d BulkStringData) RawString() string {
+	return strconv.Quote(d.String())
 }
 
 // $<length>\r\n<data>\r\n
@@ -86,6 +102,13 @@ func (p Parser) ParseBulkStrings(input []byte) (*GeneralData, int, error) {
 	if err != nil {
 		return nil, -1, fmt.Errorf("failed to parse resp length: %v", err)
 	}
+	if respLength == -1 {
+		nextIdx := respEndIdx + len(string(Terminator))
+		// NULL bulkString
+		return &GeneralData{
+			Data: NullBulkStringData{},
+		}, nextIdx, nil
+	}
 
 	dataStartIdx := respEndIdx + len(string(Terminator))
 	dataEndIdx := dataStartIdx + respLength
@@ -93,7 +116,6 @@ func (p Parser) ParseBulkStrings(input []byte) (*GeneralData, int, error) {
 
 	nextIdx := dataEndIdx + len(string(Terminator))
 	return &GeneralData{
-		Type: TypeBulkString,
 		Data: BulkStringData{
 			Length: respLength,
 			Data:   string(data),
@@ -116,12 +138,14 @@ func (d ArraysData) String() string {
 	return builder.String()
 }
 
+func (d ArraysData) RawString() string {
+	return strconv.Quote(d.String())
+}
+
 func (p Parser) ParseArrays(input []byte) (*GeneralData, int, error) {
 	utils.Assert(DataType(input[0]) == TypeArrays, "first byte must be arrays indicator")
 	elesNumStartIndex := 1
 	elesNumEndIndex := strings.Index(string(input), Terminator)
-	fmt.Println(input, []byte(Terminator))
-	fmt.Println(elesNumEndIndex)
 	utils.Assert(elesNumEndIndex != -1)
 
 	elesNum, err := strconv.Atoi(string(input[elesNumStartIndex:elesNumEndIndex]))
@@ -146,7 +170,6 @@ func (p Parser) ParseArrays(input []byte) (*GeneralData, int, error) {
 	}
 
 	return &GeneralData{
-		Type: TypeArrays,
 		Data: ArraysData{
 			Length: elesNum,
 			Datas:  datas,

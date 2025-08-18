@@ -7,3 +7,8 @@ func Assert(cond bool, msg ...string) {
 		panic(strings.Join(msg, "\n"))
 	}
 }
+
+func InstanceOf[T any](val any) bool {
+	_, isInstanceOf := val.(T)
+	return isInstanceOf
+}
