@@ -2,7 +2,7 @@ package redis
 
 import (
 	"errors"
-	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +13,7 @@ import (
 
 type (
 	Set    map[string]*Record
+	List   map[string][]resp.Data
 	Record struct {
 		Data      resp.BulkStringData
 		Timeout   time.Time
@@ -21,12 +22,14 @@ type (
 )
 
 type Controller struct {
-	set Set
+	set  Set
+	list List
 }
 
 func NewController() *Controller {
 	return &Controller{
-		set: make(Set),
+		set:  make(Set),
+		list: make(List),
 	}
 }
 
@@ -69,7 +72,7 @@ func (c *Controller) HandleSET(cmd resp.ArraysData) (resp.Data, error) {
 			case "px":
 				valIdx := keyIdx + 1
 				// valIdx is 0-based
-				if valIdx+1 <= cmd.Length {
+				if valIdx >= cmd.Length {
 					return nil, ErrInvalidArgs
 				}
 				optVal := cmd.Datas[valIdx]
@@ -114,6 +117,22 @@ func (c *Controller) HandleGET(cmd resp.ArraysData) (resp.Data, error) {
 	return record.Data, nil
 }
 
+func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
+	if cmd.Length < 3 {
+		return nil, ErrInvalidArgs
+	}
+	key := cmd.Datas[1]
+	lst, found := c.list[resp.Raw(key)]
+	if !found {
+		c.list[resp.Raw(key)] = []resp.Data{}
+		lst = c.list[resp.Raw(key)]
+	}
+	for ele := range slices.Values(cmd.Datas[2:]) {
+		lst = append(lst, ele)
+	}
+	return resp.SimpleInteger{Data: len(lst)}, nil
+}
+
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	utils.Assert(
 		utils.InstanceOf[resp.BulkStringData](data.Datas[0]),
@@ -135,6 +154,8 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "GET":
 		handler = c.HandleGET
+	case "RPUSH":
+		handler = c.HandleRPUSH
 
 	default:
 		return resp.SimpleErrorData{

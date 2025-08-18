@@ -26,6 +26,9 @@ type (
 	SimpleErrorData struct {
 		Msg string
 	}
+	SimpleInteger struct {
+		Data int
+	}
 )
 
 func (d SimpleStringData) String() string {
@@ -56,4 +59,8 @@ func (d SimpleErrorData) String() string {
 
 func Raw(data Data) string {
 	return strconv.Quote(data.String())
+}
+
+func (d SimpleInteger) String() string {
+	return fmt.Sprintf(":%d%s", d.Data, Terminator)
 }

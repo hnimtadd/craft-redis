@@ -16,7 +16,11 @@
           });
     in {
       devShells = forEachSystem ({ pkgs }: {
-        default = pkgs.mkShellNoCC { packages = with pkgs; [ redis go ]; };
+        default = pkgs.mkShellNoCC { packages = with pkgs; [
+                    redis
+                    go
+                    dlv
+                ]; };
       });
     };
 }
