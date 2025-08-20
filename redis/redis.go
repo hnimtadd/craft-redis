@@ -2,6 +2,7 @@ package redis
 
 import (
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -191,6 +192,27 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 	}, nil
 }
 
+func (c *Controller) HandleLPUSH(cmd resp.ArraysData) (resp.Data, error) {
+	if cmd.Length < 3 {
+		return nil, ErrInvalidArgs
+	}
+	key := cmd.Datas[1]
+	lst, found := c.list[resp.Raw(key)]
+	if !found {
+		c.list[resp.Raw(key)] = []resp.Data{}
+		lst = c.list[resp.Raw(key)]
+	}
+	// reverse so we have a list that should be exists after we add to the list
+	// then we just simply append the original list.
+	//
+	// NOTE: this changes order of cmd Datas, in the future, if something wrong
+	// with cmd.Data, check if this one is related first.
+	slices.Reverse(cmd.Datas[2:])
+	lst = append(cmd.Datas[2:], lst...)
+	c.list[resp.Raw(key)] = lst
+	return resp.SimpleInteger{Data: len(lst)}, nil
+}
+
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	utils.Assert(
 		utils.InstanceOf[resp.BulkStringData](data.Datas[0]),
@@ -214,8 +236,12 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 		handler = c.HandleGET
 	case "RPUSH":
 		handler = c.HandleRPUSH
+
 	case "LRANGE":
 		handler = c.HandleLRANGE
+
+	case "LPUSH":
+		handler = c.HandleLPUSH
 
 	default:
 		return resp.SimpleErrorData{
