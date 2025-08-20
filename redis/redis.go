@@ -126,9 +126,7 @@ func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
 		c.list[resp.Raw(key)] = []resp.Data{}
 		lst = c.list[resp.Raw(key)]
 	}
-	for _, ele := range cmd.Datas[2:] {
-		lst = append(lst, ele)
-	}
+	lst = append(lst, cmd.Datas[2:]...)
 	c.list[resp.Raw(key)] = lst
 	return resp.SimpleInteger{Data: len(lst)}, nil
 }
@@ -168,16 +166,20 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 		startIdx = start
 		endIdx   = end
 	)
+
+	if startIdx < 0 {
+		startIdx = len(lst) + startIdx
+		startIdx = max(startIdx, 0)
+	}
+	if endIdx < 0 {
+		endIdx = len(lst) + endIdx
+		endIdx = max(endIdx, 0)
+	}
+
 	if startIdx > endIdx {
 		return resp.ArraysData{}, nil
 	}
 
-	if startIdx < 0 {
-		startIdx = len(lst) + startIdx
-	}
-	if endIdx < 0 {
-		endIdx = len(lst) + endIdx
-	}
 	if startIdx > len(lst) {
 		return resp.ArraysData{}, nil
 	}
