@@ -129,7 +129,7 @@ func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
 	}
 	lst = append(lst, cmd.Datas[2:]...)
 	c.list[resp.Raw(key)] = lst
-	return resp.SimpleInteger{Data: len(lst)}, nil
+	return resp.Integer{Data: len(lst)}, nil
 }
 
 func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
@@ -210,7 +210,19 @@ func (c *Controller) HandleLPUSH(cmd resp.ArraysData) (resp.Data, error) {
 	slices.Reverse(cmd.Datas[2:])
 	lst = append(cmd.Datas[2:], lst...)
 	c.list[resp.Raw(key)] = lst
-	return resp.SimpleInteger{Data: len(lst)}, nil
+	return resp.Integer{Data: len(lst)}, nil
+}
+
+func (c *Controller) HandleLLEN(cmd resp.ArraysData) (resp.Data, error) {
+	if cmd.Length != 2 {
+		return nil, ErrInvalidArgs
+	}
+	key := cmd.Datas[1]
+	lst, found := c.list[resp.Raw(key)]
+	if !found {
+		return resp.Integer{}, nil
+	}
+	return resp.Integer{Data: len(lst)}, nil
 }
 
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
@@ -242,6 +254,9 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "LPUSH":
 		handler = c.HandleLPUSH
+
+	case "LLEN":
+		handler = c.HandleLLEN
 
 	default:
 		return resp.SimpleErrorData{

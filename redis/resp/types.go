@@ -26,7 +26,7 @@ type (
 	SimpleErrorData struct {
 		Msg string
 	}
-	SimpleInteger struct {
+	Integer struct {
 		Data int
 	}
 )
@@ -61,6 +61,6 @@ func Raw(data Data) string {
 	return strconv.Quote(data.String())
 }
 
-func (d SimpleInteger) String() string {
+func (d Integer) String() string {
 	return fmt.Sprintf(":%d%s", d.Data, Terminator)
 }
