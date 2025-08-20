@@ -225,6 +225,28 @@ func (c *Controller) HandleLLEN(cmd resp.ArraysData) (resp.Data, error) {
 	return resp.Integer{Data: len(lst)}, nil
 }
 
+func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
+	if cmd.Length != 2 {
+		return nil, ErrInvalidArgs
+	}
+	key := cmd.Datas[1]
+	lst, found := c.list[resp.Raw(key)]
+	if !found {
+		return resp.BulkStringData{}, nil
+	}
+	if len(lst) == 0 {
+		return resp.BulkStringData{}, nil
+	}
+	popItem := lst[0]
+	if len(lst) == 1 {
+		c.list[resp.Raw(key)] = []resp.Data{}
+	} else {
+		c.list[resp.Raw(key)] = lst[1:]
+	}
+
+	return popItem, nil
+}
+
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	utils.Assert(
 		utils.InstanceOf[resp.BulkStringData](data.Datas[0]),
@@ -257,6 +279,8 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "LLEN":
 		handler = c.HandleLLEN
+	case "LPOP":
+		handler = c.HandleLPOP
 
 	default:
 		return resp.SimpleErrorData{
