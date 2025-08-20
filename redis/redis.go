@@ -130,6 +130,7 @@ func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
 	for ele := range slices.Values(cmd.Datas[2:]) {
 		lst = append(lst, ele)
 	}
+	c.list[resp.Raw(key)] = lst
 	return resp.SimpleInteger{Data: len(lst)}, nil
 }
 
