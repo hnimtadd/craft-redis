@@ -2,7 +2,6 @@ package redis
 
 import (
 	"errors"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -127,11 +126,67 @@ func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
 		c.list[resp.Raw(key)] = []resp.Data{}
 		lst = c.list[resp.Raw(key)]
 	}
-	for ele := range slices.Values(cmd.Datas[2:]) {
+	for _, ele := range cmd.Datas[2:] {
 		lst = append(lst, ele)
 	}
 	c.list[resp.Raw(key)] = lst
 	return resp.SimpleInteger{Data: len(lst)}, nil
+}
+
+func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
+	if cmd.Length != 4 {
+		return nil, ErrInvalidArgs
+	}
+	key := cmd.Datas[1]
+	utils.Assert(
+		utils.InstanceOf[resp.BulkStringData](key),
+		"startIndex must be a bulk string",
+	)
+	lst, found := c.list[resp.Raw(key)]
+	if !found {
+		return resp.ArraysData{}, nil
+	}
+	startData := cmd.Datas[2]
+	if !utils.InstanceOf[resp.BulkStringData](startData) {
+		return nil, ErrInvalidArgs
+	}
+	endData := cmd.Datas[3]
+	if !utils.InstanceOf[resp.BulkStringData](endData) {
+		return nil, ErrInvalidArgs
+	}
+	startString := startData.(resp.BulkStringData).Data
+	endString := endData.(resp.BulkStringData).Data
+	start, err := strconv.Atoi(startString)
+	if err != nil {
+		return nil, ErrInvalidArgs
+	}
+	end, err := strconv.Atoi(endString)
+	if err != nil {
+		return nil, ErrInvalidArgs
+	}
+	var (
+		startIdx = start
+		endIdx   = end
+	)
+	if startIdx > endIdx {
+		return resp.ArraysData{}, nil
+	}
+
+	if startIdx < 0 {
+		startIdx = len(lst) + startIdx
+	}
+	if endIdx < 0 {
+		endIdx = len(lst) + endIdx
+	}
+	if startIdx > len(lst) {
+		return resp.ArraysData{}, nil
+	}
+
+	endIdx = min(endIdx, len(lst)-1)
+	return resp.ArraysData{
+		Length: endIdx - startIdx + 1,
+		Datas:  lst[startIdx : endIdx+1],
+	}, nil
 }
 
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
@@ -157,6 +212,8 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 		handler = c.HandleGET
 	case "RPUSH":
 		handler = c.HandleRPUSH
+	case "LRANGE":
+		handler = c.HandleLRANGE
 
 	default:
 		return resp.SimpleErrorData{
