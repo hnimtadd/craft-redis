@@ -19,7 +19,6 @@
         default = pkgs.mkShellNoCC { packages = with pkgs; [
                     redis
                     go
-                    dlv
                 ]; };
       });
     };

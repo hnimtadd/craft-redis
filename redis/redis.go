@@ -2,7 +2,7 @@ package redis
 
 import (
 	"errors"
-	"slices"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +12,6 @@ import (
 )
 
 type (
-	Set    map[string]*Record
 	List   map[string][]resp.Data
 	Record struct {
 		Data      resp.BulkStringData
@@ -22,14 +21,14 @@ type (
 )
 
 type Controller struct {
-	set  Set
-	list List
+	set  *Set[Record]
+	list *Set[BLList[resp.Data]]
 }
 
 func NewController() *Controller {
 	return &Controller{
-		set:  make(Set),
-		list: make(List),
+		set:  NewBLSet[Record](nil),
+		list: NewBLSet(NewBLList[resp.Data]),
 	}
 }
 
@@ -89,7 +88,7 @@ func (c *Controller) HandleSET(cmd resp.ArraysData) (resp.Data, error) {
 		}
 	}
 
-	c.set[resp.Raw(key)] = &record
+	c.set.BLSet(resp.Raw(key), &record)
 	return resp.SimpleStringData{Data: "OK"}, nil
 }
 
@@ -102,7 +101,7 @@ func (c *Controller) HandleGET(cmd resp.ArraysData) (resp.Data, error) {
 		utils.InstanceOf[resp.BulkStringData](key),
 		"key must be bulk strings",
 	)
-	record, found := c.set[resp.Raw(key)]
+	record, found := c.set.Get(resp.Raw(key))
 	if !found {
 		return resp.NullBulkStringData{}, nil
 	}
@@ -122,14 +121,10 @@ func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	lst, found := c.list[resp.Raw(key)]
-	if !found {
-		c.list[resp.Raw(key)] = []resp.Data{}
-		lst = c.list[resp.Raw(key)]
-	}
-	lst = append(lst, cmd.Datas[2:]...)
-	c.list[resp.Raw(key)] = lst
-	return resp.Integer{Data: len(lst)}, nil
+	lst, _ := c.list.Get(resp.Raw(key))
+	defer lst.Signal()
+	len := lst.Append(cmd.Datas[2:]...)
+	return resp.Integer{Data: len}, nil
 }
 
 func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
@@ -139,10 +134,9 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 	key := cmd.Datas[1]
 	utils.Assert(
 		utils.InstanceOf[resp.BulkStringData](key),
-		"startIndex must be a bulk string",
+		"key must be a bulk string",
 	)
-	lst, found := c.list[resp.Raw(key)]
-	if !found {
+	if !c.list.Has(resp.Raw(key)) {
 		return resp.ArraysData{}, nil
 	}
 	startData := cmd.Datas[2]
@@ -163,17 +157,19 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 	if err != nil {
 		return nil, ErrInvalidArgs
 	}
+
+	lst, _ := c.list.Get(resp.Raw(key))
 	var (
 		startIdx = start
 		endIdx   = end
 	)
 
 	if startIdx < 0 {
-		startIdx = len(lst) + startIdx
+		startIdx = lst.Len() + startIdx
 		startIdx = max(startIdx, 0)
 	}
 	if endIdx < 0 {
-		endIdx = len(lst) + endIdx
+		endIdx = lst.Len() + endIdx
 		endIdx = max(endIdx, 0)
 	}
 
@@ -181,14 +177,22 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 		return resp.ArraysData{}, nil
 	}
 
-	if startIdx > len(lst) {
+	if startIdx > lst.Len() {
 		return resp.ArraysData{}, nil
 	}
 
-	endIdx = min(endIdx, len(lst)-1)
+	endIdx = min(endIdx, lst.Len()-1)
+	eles, err := lst.Slice(uint(startIdx), uint(endIdx+1))
+	if err != nil {
+		return nil, fmt.Errorf("cannot get element: %v", err)
+	}
+	results := make([]resp.Data, len(eles))
+	for idx, ele := range eles {
+		results[idx] = *ele
+	}
 	return resp.ArraysData{
 		Length: endIdx - startIdx + 1,
-		Datas:  lst[startIdx : endIdx+1],
+		Datas:  results,
 	}, nil
 }
 
@@ -197,20 +201,15 @@ func (c *Controller) HandleLPUSH(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	lst, found := c.list[resp.Raw(key)]
-	if !found {
-		c.list[resp.Raw(key)] = []resp.Data{}
-		lst = c.list[resp.Raw(key)]
-	}
+	lst, _ := c.list.Get(resp.Raw(key))
+	defer lst.Signal()
 	// reverse so we have a list that should be exists after we add to the list
 	// then we just simply append the original list.
-	//
-	// NOTE: this changes order of cmd Datas, in the future, if something wrong
-	// with cmd.Data, check if this one is related first.
-	slices.Reverse(cmd.Datas[2:])
-	lst = append(cmd.Datas[2:], lst...)
-	c.list[resp.Raw(key)] = lst
-	return resp.Integer{Data: len(lst)}, nil
+	for _, data := range cmd.Datas[2:] {
+		lst.Prepend(data)
+	}
+
+	return resp.Integer{Data: lst.Len()}, nil
 }
 
 func (c *Controller) HandleLLEN(cmd resp.ArraysData) (resp.Data, error) {
@@ -218,11 +217,11 @@ func (c *Controller) HandleLLEN(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	lst, found := c.list[resp.Raw(key)]
-	if !found {
+	if !c.list.Has(resp.Raw(key)) {
 		return resp.Integer{}, nil
 	}
-	return resp.Integer{Data: len(lst)}, nil
+	lst, _ := c.list.Get(resp.Raw(key))
+	return resp.Integer{Data: lst.Len()}, nil
 }
 
 func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
@@ -230,11 +229,11 @@ func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	lst, found := c.list[resp.Raw(key)]
-	if !found {
+	if !c.list.Has(resp.Raw(key)) {
 		return resp.BulkStringData{}, nil
 	}
-	if len(lst) == 0 {
+	lst, _ := c.list.Get(resp.Raw(key))
+	if lst.Len() == 0 {
 		return resp.BulkStringData{}, nil
 	}
 
@@ -257,17 +256,131 @@ func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
 
 	switch numItem {
 	case 1:
-		popItem := lst[0]
-		c.list[resp.Raw(key)] = lst[numItem:]
-		return popItem, nil
+		popItem, err := lst.Remove(0)
+		if err != nil {
+			return nil, err
+		}
+		return *popItem, nil
 	default:
-		numItem = min(numItem, len(lst))
-		popItems := lst[:numItem]
-		c.list[resp.Raw(key)] = lst[numItem:]
+		numItem = min(numItem, lst.Len())
+		popItems := make([]resp.Data, numItem)
+
+		for idx := range numItem {
+			popItem, err := lst.Remove(0)
+			if err != nil {
+				return nil, err
+			}
+			popItems[idx] = *popItem
+		}
 
 		return resp.ArraysData{
-			Length: len(popItems),
+			Length: numItem,
 			Datas:  popItems,
+		}, nil
+	}
+}
+
+func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
+	if cmd.Length < 3 {
+		return nil, ErrInvalidArgs
+	}
+	timeoutInSecData := cmd.Datas[len(cmd.Datas)-1]
+	if !utils.InstanceOf[resp.BulkStringData](timeoutInSecData) {
+		return nil, ErrInvalidArgs
+	}
+	timeoutInSec, err := strconv.Atoi(timeoutInSecData.(resp.BulkStringData).Data)
+	if err != nil {
+		return nil, ErrInvalidArgs
+	}
+	keysData := cmd.Datas[1 : len(cmd.Datas)-1]
+	keys := make([]resp.Data, len(keysData))
+	for idx, data := range keysData {
+		if !utils.InstanceOf[resp.BulkStringData](data) {
+			return nil, ErrInvalidArgs
+		}
+		keys[idx] = data
+	}
+
+	cancelCh := make(chan any)
+	doneCh := make(chan resp.Data, 1)
+
+	for _, key := range keys {
+		go func(key resp.Data) {
+			lst, _ := c.list.Get(resp.Raw(key))
+			if lst.Len() > 0 {
+				select {
+				case doneCh <- key:
+					fmt.Printf("Routine for %s sent signal.\n", resp.Raw(key))
+				case <-cancelCh:
+					fmt.Printf("Routine for %s found another signal was already sent and was canceled.\n", resp.Raw(key))
+				}
+			}
+			sub := lst.NewSubscription()
+			select {
+			case <-cancelCh:
+				fmt.Printf("Routine for %s was canceled before it was signaled.\n", resp.Raw(key))
+				return // Exit gracefully.
+			default:
+				// Not canceled yet, proceed to wait.
+			}
+
+			sub = lst.Subscribe(sub)
+			waitCh := make(chan struct{})
+			go func() {
+				sub.Wait()
+				close(waitCh)
+			}()
+
+			select {
+			case <-waitCh:
+				fmt.Printf("Routine for %s has been woken up.\n", resp.Raw(key))
+				// Try to send on the done channel.
+				select {
+				case doneCh <- key:
+					fmt.Printf("Routine for %s sent signal.\n", resp.Raw(key))
+				case <-cancelCh:
+					sub.cond.Signal()
+					// If a cancel signal arrived while we were trying to send,
+					// it means another routine won the race.
+					fmt.Printf("Routine for %s found another signal was already sent and was canceled.\n", resp.Raw(key))
+				}
+			case <-cancelCh:
+				sub.cond.Signal()
+				fmt.Printf("Routine for %s was canceled while waiting.\n", resp.Raw(key))
+				// At this point, the goroutine from `cond.Wait()` is still blocked.
+				// There is no clean way to unblock a `cond.Wait()` from outside.
+				// This is why the cleanup method is critical for the `A` struct to work.
+			}
+			sub.Deactivate()
+		}(key)
+	}
+	defer close(cancelCh)
+
+	if timeoutInSec > 0 {
+		select {
+		case key := <-doneCh:
+			lst, _ := c.list.Get(resp.Raw(key))
+			ele, err := lst.Remove(0)
+			if err != nil {
+				return nil, err
+			}
+			return resp.ArraysData{
+				Length: 2,
+				Datas:  []resp.Data{key, *ele},
+			}, nil
+		case <-time.After(time.Duration(timeoutInSec) * time.Second):
+			return resp.NullBulkStringData{}, nil
+		}
+	} else {
+		key := <-doneCh
+		lst, _ := c.list.Get(resp.Raw(key))
+		ele, err := lst.Remove(0)
+		if err != nil {
+			return nil, err
+		}
+		return resp.ArraysData{
+			Length: 2,
+			Datas:  []resp.Data{key, *ele},
 		}, nil
 	}
 }
@@ -293,6 +406,7 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "GET":
 		handler = c.HandleGET
+
 	case "RPUSH":
 		handler = c.HandleRPUSH
 
@@ -307,6 +421,9 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "LPOP":
 		handler = c.HandleLPOP
+
+	case "BLPOP":
+		handler = c.HandleBLPOP
 
 	default:
 		return resp.SimpleErrorData{
