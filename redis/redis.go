@@ -226,7 +226,7 @@ func (c *Controller) HandleLLEN(cmd resp.ArraysData) (resp.Data, error) {
 }
 
 func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length != 2 {
+	if cmd.Length < 2 {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
@@ -237,14 +237,39 @@ func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
 	if len(lst) == 0 {
 		return resp.BulkStringData{}, nil
 	}
-	popItem := lst[0]
-	if len(lst) == 1 {
-		c.list[resp.Raw(key)] = []resp.Data{}
-	} else {
-		c.list[resp.Raw(key)] = lst[1:]
+
+	numItem := 1
+	if cmd.Length == 3 {
+		arg := cmd.Datas[2]
+		if !utils.InstanceOf[resp.BulkStringData](arg) {
+			return nil, ErrInvalidArgs
+		}
+		argString := arg.(resp.BulkStringData).Data
+		parsed, err := strconv.Atoi(argString)
+		if err != nil {
+			return nil, ErrInvalidArgs
+		}
+		if parsed < 0 {
+			return nil, ErrInvalidArgs
+		}
+		numItem = parsed
 	}
 
-	return popItem, nil
+	switch numItem {
+	case 1:
+		popItem := lst[0]
+		c.list[resp.Raw(key)] = lst[numItem:]
+		return popItem, nil
+	default:
+		numItem = min(numItem, len(lst))
+		popItems := lst[:numItem]
+		c.list[resp.Raw(key)] = lst[numItem:]
+
+		return resp.ArraysData{
+			Length: len(popItems),
+			Datas:  popItems,
+		}, nil
+	}
 }
 
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
@@ -279,6 +304,7 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "LLEN":
 		handler = c.HandleLLEN
+
 	case "LPOP":
 		handler = c.HandleLPOP
 
