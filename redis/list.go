@@ -92,11 +92,11 @@ func (l *BLList[T]) Slice(start, end uint) ([]*T, error) {
 	if start > end {
 		return nil, errors.New("invalid args, start must smaller than end")
 	}
-	if start >= uint(l.data.Len()) || end >= uint(l.data.Len()) {
+	if start >= uint(l.data.Len()) || end > uint(l.data.Len()) {
 		return nil, errors.New("out of length")
 	}
-	left, right := l.get(start), l.get(end)
-	if left == nil || right == nil {
+	left := l.get(start)
+	if left == nil {
 		return nil, errors.New("something wrong")
 	}
 	eles := make([]*T, end-start)

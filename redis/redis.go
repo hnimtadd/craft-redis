@@ -182,6 +182,7 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 	}
 
 	endIdx = min(endIdx, lst.Len()-1)
+	fmt.Println("startIdx", startIdx, "endIdx", endIdx)
 	eles, err := lst.Slice(uint(startIdx), uint(endIdx+1))
 	if err != nil {
 		return nil, fmt.Errorf("cannot get element: %v", err)
