@@ -289,10 +289,11 @@ func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
 	if !utils.InstanceOf[resp.BulkStringData](timeoutInSecData) {
 		return nil, ErrInvalidArgs
 	}
-	timeoutInSec, err := strconv.Atoi(timeoutInSecData.(resp.BulkStringData).Data)
+	timeoutInSec, err := strconv.ParseFloat(timeoutInSecData.(resp.BulkStringData).Data, 64)
 	if err != nil {
 		return nil, ErrInvalidArgs
 	}
+	timeoutInMs := timeoutInSec * 1000
 	keysData := cmd.Datas[1 : len(cmd.Datas)-1]
 	keys := make([]resp.Data, len(keysData))
 	for idx, data := range keysData {
@@ -357,7 +358,8 @@ func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
 	}
 	defer close(cancelCh)
 
-	if timeoutInSec > 0 {
+	if timeoutInMs > 0 {
+		fmt.Println(timeoutInMs)
 		select {
 		case key := <-doneCh:
 			lst, _ := c.list.Get(resp.Raw(key))
@@ -369,7 +371,7 @@ func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
 				Length: 2,
 				Datas:  []resp.Data{key, *ele},
 			}, nil
-		case <-time.After(time.Duration(timeoutInSec) * time.Second):
+		case <-time.After(time.Duration(timeoutInMs) * time.Millisecond):
 			return resp.NullBulkStringData{}, nil
 		}
 	} else {
