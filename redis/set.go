@@ -20,22 +20,13 @@ func NewBLSet[T any](factory ElementFactory[T]) *Set[T] {
 	}
 }
 
-func (s *Set[T]) BLUpdate(key string, data *T) (*T, bool) {
-	_, found := s.data.Load(key)
-	if !found {
-		return nil, false
-	}
-	s.data.Swap(key, &data)
-	return data, true
-}
-
-func (s *Set[T]) BLSet(key string, data *T) (*T, bool) {
+func (s *Set[T]) Set(key string, data *T) (*T, bool) {
 	_, found := s.data.Load(key)
 	if found {
 		return nil, false
 	}
 
-	s.data.Store(key, &data)
+	s.data.Store(key, data)
 	return data, true
 }
 

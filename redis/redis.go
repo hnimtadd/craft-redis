@@ -88,7 +88,8 @@ func (c *Controller) HandleSET(cmd resp.ArraysData) (resp.Data, error) {
 		}
 	}
 
-	c.set.BLSet(resp.Raw(key), &record)
+	v, found := c.set.Set(resp.Raw(key), &record)
+	fmt.Println(v.Data.Data, found)
 	return resp.SimpleStringData{Data: "OK"}, nil
 }
 
@@ -101,10 +102,10 @@ func (c *Controller) HandleGET(cmd resp.ArraysData) (resp.Data, error) {
 		utils.InstanceOf[resp.BulkStringData](key),
 		"key must be bulk strings",
 	)
-	record, found := c.set.Get(resp.Raw(key))
-	if !found {
+	if !c.set.Has(resp.Raw(key)) {
 		return resp.NullBulkStringData{}, nil
 	}
+	record, _ := c.set.Get(resp.Raw(key))
 	if record.isExpired {
 		return resp.NullBulkStringData{}, nil
 	}
@@ -182,7 +183,6 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 	}
 
 	endIdx = min(endIdx, lst.Len()-1)
-	fmt.Println("startIdx", startIdx, "endIdx", endIdx)
 	eles, err := lst.Slice(uint(startIdx), uint(endIdx+1))
 	if err != nil {
 		return nil, fmt.Errorf("cannot get element: %v", err)
