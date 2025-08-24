@@ -1,8 +1,6 @@
 package redis
 
 import (
-	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -17,10 +15,11 @@ type (
 		Timeout   time.Time
 		isExpired bool
 	}
-	SetValueType string
-	Value        struct {
+	SetValueType    string
+	SetValuePayload any
+	Value           struct {
 		Type SetValueType
-		Data any
+		Data SetValuePayload
 	}
 )
 
@@ -34,427 +33,19 @@ func NewController() *Controller {
 	}
 }
 
-func (c *Controller) HandleECHO(cmd resp.ArraysData) (resp.Data, error) {
-	return cmd.Datas[1], nil
-}
-
-func (c *Controller) HandlePING(cmd resp.ArraysData) (resp.Data, error) {
-	return resp.SimpleStringData{Data: "PONG"}, nil
-}
-
-func (c *Controller) HandleSET(cmd resp.ArraysData) (resp.Data, error) {
-	utils.Assert(cmd.Length >= 3)
-	if cmd.Length < 3 {
-		return nil, ErrInvalidArgs
-	}
-	key := cmd.Datas[1]
-	value := cmd.Datas[2]
-	utils.Assert(
-		utils.InstanceOf[resp.BulkStringData](key),
-		"key must be bulk strings",
-	)
-	utils.Assert(
-		utils.InstanceOf[resp.BulkStringData](value),
-		"value must be bulk strings",
-	)
-	record := Record{
-		Data: value.(resp.BulkStringData),
-	}
-	if cmd.Length > 3 {
-		for keyIdx := 3; keyIdx < cmd.Length; keyIdx += 2 {
-			optKey := cmd.Datas[keyIdx]
-
-			utils.Assert(
-				utils.InstanceOf[resp.BulkStringData](optKey),
-				"option must be bulk strings",
-			)
-			switch strings.ToLower(optKey.(resp.BulkStringData).Data) {
-			case "px":
-				valIdx := keyIdx + 1
-				// valIdx is 0-based
-				if valIdx >= cmd.Length {
-					return nil, ErrInvalidArgs
-				}
-				optVal := cmd.Datas[valIdx]
-				utils.Assert(
-					utils.InstanceOf[resp.BulkStringData](optVal),
-					"option must be bulk strings",
-				)
-				ttlInMs, err := strconv.Atoi(optVal.(resp.BulkStringData).Data)
-				if err != nil {
-					return nil, errors.New("invalid ttl")
-				}
-				record.Timeout = time.Now().Add(time.Millisecond * time.Duration(ttlInMs))
-			}
-		}
-	}
-
-	c.data.Set(resp.Raw(key), &Value{
-		Type: SetValueTypeString,
-		Data: &record,
-	})
-	return resp.SimpleStringData{Data: "OK"}, nil
-}
-
-func (c *Controller) HandleGET(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length != 2 {
-		return nil, ErrInvalidArgs
-	}
-	key := cmd.Datas[1]
-	utils.Assert(
-		utils.InstanceOf[resp.BulkStringData](key),
-		"key must be bulk strings",
-	)
-	value, found := c.data.Get(resp.Raw(key))
-	if !found {
-		return resp.NullBulkStringData{}, nil
-	}
-	if value.Type != SetValueTypeString {
-		return nil, fmt.Errorf("invalid key type")
-	}
-	record := value.Data.(*Record)
-	if record.isExpired {
-		return resp.NullBulkStringData{}, nil
-	}
-	if !record.Timeout.IsZero() &&
-		record.Timeout.Before(time.Now()) {
-		record.isExpired = true
-		return resp.NullBulkStringData{}, nil
-	}
-	return record.Data, nil
-}
-
-func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length < 3 {
-		return nil, ErrInvalidArgs
-	}
-	key := cmd.Datas[1]
-	value, _ := c.data.Getsert(resp.Raw(key), &Value{
-		Type: SetValueTypeList,
-		Data: NewBLList[resp.Data](),
-	})
-	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
-	}
-	lst := value.Data.(*BLList[resp.Data])
-	defer lst.Signal()
-	len := lst.Append(cmd.Datas[2:]...)
-
-	return resp.Integer{Data: len}, nil
-}
-
-func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length != 4 {
-		return nil, ErrInvalidArgs
-	}
-	key := cmd.Datas[1]
-	utils.Assert(
-		utils.InstanceOf[resp.BulkStringData](key),
-		"key must be a bulk string",
-	)
-	value, found := c.data.Get(resp.Raw(key))
-	if !found {
-		return resp.ArraysData{}, nil
-	}
-	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
-	}
-	lst := value.Data.(*BLList[resp.Data])
-	startData := cmd.Datas[2]
-	if !utils.InstanceOf[resp.BulkStringData](startData) {
-		return nil, ErrInvalidArgs
-	}
-	endData := cmd.Datas[3]
-	if !utils.InstanceOf[resp.BulkStringData](endData) {
-		return nil, ErrInvalidArgs
-	}
-	startString := startData.(resp.BulkStringData).Data
-	endString := endData.(resp.BulkStringData).Data
-	start, err := strconv.Atoi(startString)
-	if err != nil {
-		return nil, ErrInvalidArgs
-	}
-	end, err := strconv.Atoi(endString)
-	if err != nil {
-		return nil, ErrInvalidArgs
-	}
-
-	var (
-		startIdx = start
-		endIdx   = end
-	)
-
-	if startIdx < 0 {
-		startIdx = lst.Len() + startIdx
-		startIdx = max(startIdx, 0)
-	}
-	if endIdx < 0 {
-		endIdx = lst.Len() + endIdx
-		endIdx = max(endIdx, 0)
-	}
-
-	if startIdx > endIdx {
-		return resp.ArraysData{}, nil
-	}
-
-	if startIdx > lst.Len() {
-		return resp.ArraysData{}, nil
-	}
-
-	endIdx = min(endIdx, lst.Len()-1)
-	eles, err := lst.Slice(uint(startIdx), uint(endIdx+1))
-	if err != nil {
-		return nil, fmt.Errorf("cannot get element: %v", err)
-	}
-	results := make([]resp.Data, len(eles))
-	for idx, ele := range eles {
-		results[idx] = *ele
-	}
-	return resp.ArraysData{
-		Length: endIdx - startIdx + 1,
-		Datas:  results,
-	}, nil
-}
-
-func (c *Controller) HandleLPUSH(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length < 3 {
-		return nil, ErrInvalidArgs
-	}
-	key := cmd.Datas[1]
-	value, found := c.data.Getsert(resp.Raw(key), &Value{
-		Type: SetValueTypeList,
-		Data: NewBLList[resp.Data](),
-	})
-	if !found {
-		return resp.ArraysData{}, nil
-	}
-	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
-	}
-	lst := value.Data.(*BLList[resp.Data])
-	defer lst.Signal()
-	// reverse so we have a list that should be exists after we add to the list
-	// then we just simply append the original list.
-	for _, data := range cmd.Datas[2:] {
-		lst.Prepend(data)
-	}
-
-	return resp.Integer{Data: lst.Len()}, nil
-}
-
-func (c *Controller) HandleLLEN(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length != 2 {
-		return nil, ErrInvalidArgs
-	}
-	key := cmd.Datas[1]
-	value, found := c.data.Get(resp.Raw(key))
-	if !found {
-		return resp.ArraysData{}, nil
-	}
-	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
-	}
-	lst := value.Data.(*BLList[resp.Data])
-	return resp.Integer{Data: lst.Len()}, nil
-}
-
-func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length < 2 {
-		return nil, ErrInvalidArgs
-	}
-	key := cmd.Datas[1]
-	value, found := c.data.Get(resp.Raw(key))
-	if !found {
-		return resp.ArraysData{}, nil
-	}
-	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
-	}
-	lst := value.Data.(*BLList[resp.Data])
-	if lst.Len() == 0 {
-		return resp.BulkStringData{}, nil
-	}
-
-	numItem := 1
-	if cmd.Length == 3 {
-		arg := cmd.Datas[2]
-		if !utils.InstanceOf[resp.BulkStringData](arg) {
-			return nil, ErrInvalidArgs
-		}
-		argString := arg.(resp.BulkStringData).Data
-		parsed, err := strconv.Atoi(argString)
-		if err != nil {
-			return nil, ErrInvalidArgs
-		}
-		if parsed < 0 {
-			return nil, ErrInvalidArgs
-		}
-		numItem = parsed
-	}
-
-	switch numItem {
-	case 1:
-		popItem, err := lst.Remove(0)
-		if err != nil {
-			return nil, err
-		}
-		return *popItem, nil
-	default:
-		numItem = min(numItem, lst.Len())
-		popItems := make([]resp.Data, numItem)
-
-		for idx := range numItem {
-			popItem, err := lst.Remove(0)
-			if err != nil {
-				return nil, err
-			}
-			popItems[idx] = *popItem
-		}
-
-		return resp.ArraysData{
-			Length: numItem,
-			Datas:  popItems,
-		}, nil
-	}
-}
-
-func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
-	if cmd.Length < 3 {
-		return nil, ErrInvalidArgs
-	}
-	timeoutInSecData := cmd.Datas[len(cmd.Datas)-1]
-	if !utils.InstanceOf[resp.BulkStringData](timeoutInSecData) {
-		return nil, ErrInvalidArgs
-	}
-	timeoutInSec, err := strconv.ParseFloat(timeoutInSecData.(resp.BulkStringData).Data, 64)
-	if err != nil {
-		return nil, ErrInvalidArgs
-	}
-	timeoutInMs := timeoutInSec * 1000
-	keysData := cmd.Datas[1 : len(cmd.Datas)-1]
-	keys := make([]resp.Data, len(keysData))
-	for idx, data := range keysData {
-		if !utils.InstanceOf[resp.BulkStringData](data) {
-			return nil, ErrInvalidArgs
-		}
-		keys[idx] = data
-	}
-
-	cancelCh := make(chan any)
-	doneCh := make(chan resp.Data, 1)
-
-	for _, key := range keys {
-		go func(key resp.Data) {
-			value, _ := c.data.Getsert(resp.Raw(key), &Value{
-				Type: SetValueTypeList,
-				Data: NewBLList[resp.Data](),
-			})
-			if value.Type != SetValueTypeList {
-				return
-			}
-			lst := value.Data.(*BLList[resp.Data])
-			if lst.Len() > 0 {
-				select {
-				case doneCh <- key:
-					fmt.Printf("Routine for %s sent signal.\n", resp.Raw(key))
-				case <-cancelCh:
-					fmt.Printf("Routine for %s found another signal was already sent and was canceled.\n", resp.Raw(key))
-				}
-			}
-			sub := lst.NewSubscription()
-			select {
-			case <-cancelCh:
-				fmt.Printf("Routine for %s was canceled before it was signaled.\n", resp.Raw(key))
-				return // Exit gracefully.
-			default:
-				// Not canceled yet, proceed to wait.
-			}
-
-			sub = lst.Subscribe(sub)
-			waitCh := make(chan struct{})
-			go func() {
-				sub.Wait()
-				close(waitCh)
-			}()
-
-			select {
-			case <-waitCh:
-				fmt.Printf("Routine for %s has been woken up.\n", resp.Raw(key))
-				// Try to send on the done channel.
-				select {
-				case doneCh <- key:
-					fmt.Printf("Routine for %s sent signal.\n", resp.Raw(key))
-				case <-cancelCh:
-					sub.cond.Signal()
-					// If a cancel signal arrived while we were trying to send,
-					// it means another routine won the race.
-					fmt.Printf("Routine for %s found another signal was already sent and was canceled.\n", resp.Raw(key))
-				}
-			case <-cancelCh:
-				sub.cond.Signal()
-				fmt.Printf("Routine for %s was canceled while waiting.\n", resp.Raw(key))
-				// At this point, the goroutine from `cond.Wait()` is still blocked.
-				// There is no clean way to unblock a `cond.Wait()` from outside.
-				// This is why the cleanup method is critical for the `A` struct to work.
-			}
-			sub.Deactivate()
-		}(key)
-	}
-	defer close(cancelCh)
-
-	if timeoutInMs > 0 {
-		fmt.Println(timeoutInMs)
-		select {
-		case key := <-doneCh:
-			value, found := c.data.Get(resp.Raw(key))
-			if !found {
-				return resp.ArraysData{}, nil
-			}
-			if value.Type != SetValueTypeList {
-				return nil, fmt.Errorf("invalid element type")
-			}
-			lst := value.Data.(*BLList[resp.Data])
-			ele, err := lst.Remove(0)
-			if err != nil {
-				return nil, err
-			}
-			return resp.ArraysData{
-				Length: 2,
-				Datas:  []resp.Data{key, *ele},
-			}, nil
-		case <-time.After(time.Duration(timeoutInMs) * time.Millisecond):
-			return resp.NullBulkStringData{}, nil
-		}
-	} else {
-		key := <-doneCh
-		value, found := c.data.Get(resp.Raw(key))
-		if !found {
-			return resp.ArraysData{}, nil
-		}
-		if value.Type != SetValueTypeList {
-			return nil, fmt.Errorf("invalid element type")
-		}
-		lst := value.Data.(*BLList[resp.Data])
-		ele, err := lst.Remove(0)
-		if err != nil {
-			return nil, err
-		}
-		return resp.ArraysData{
-			Length: 2,
-			Datas:  []resp.Data{key, *ele},
-		}, nil
-	}
-}
-
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	utils.Assert(
 		utils.InstanceOf[resp.BulkStringData](data.Datas[0]),
 		"command must be a bulk string",
 	)
 
-	cmdData := data.Datas[0].(resp.BulkStringData)
-	var handler func(resp.ArraysData) (resp.Data, error)
-	switch cmd := strings.ToUpper(cmdData.Data); cmd {
+	cmd, err := parse(data)
+	if err != nil {
+		return resp.SimpleErrorData{Msg: err.Error()}
+	}
+
+	var handler func([]resp.BulkStringData) (resp.Data, error)
+	switch cmd := strings.ToUpper(cmd.cmd.Data); cmd {
 
 	case "ECHO":
 		handler = c.HandleECHO
@@ -492,9 +83,137 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 			// todo data
 		}
 	}
-	res, err := handler(data)
+	res, err := handler(cmd.args)
 	if err != nil {
 		return resp.SimpleErrorData{Msg: err.Error()}
 	}
 	return res
+}
+
+func (c *Controller) HandleECHO(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) == 0 {
+		return nil, ErrInvalidArgs
+	}
+	return args[0], nil
+}
+
+func (c *Controller) HandlePING(args []resp.BulkStringData) (resp.Data, error) {
+	return resp.SimpleStringData{Data: "PONG"}, nil
+}
+
+func (c *Controller) HandleSET(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) < 2 {
+		return nil, ErrInvalidArgs
+	}
+	return c.handleSet(args[0], args[1], args[2:]...)
+}
+
+func (c *Controller) HandleGET(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) != 1 {
+		return nil, ErrInvalidArgs
+	}
+	return c.handleGet(args[0])
+}
+
+func (c *Controller) HandleRPUSH(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) < 2 {
+		return nil, ErrInvalidArgs
+	}
+	return c.handleRPUSH(args[0], args[1:]...)
+}
+
+func (c *Controller) HandleLRANGE(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) != 3 {
+		return nil, ErrInvalidArgs
+	}
+	keyData := args[0]
+	fromString := args[1].Data
+	toString := args[2].Data
+	from, err := strconv.Atoi(fromString)
+	if err != nil {
+		return nil, ErrInvalidArgs
+	}
+	to, err := strconv.Atoi(toString)
+	if err != nil {
+		return nil, ErrInvalidArgs
+	}
+	return c.handleLRANGE(keyData, from, to)
+}
+
+func (c *Controller) HandleLPUSH(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) < 2 {
+		return nil, ErrInvalidArgs
+	}
+	key := args[0]
+	return c.handleLPUSH(key, args[1:]...)
+}
+
+func (c *Controller) HandleLLEN(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) != 1 {
+		return nil, ErrInvalidArgs
+	}
+	return c.handleLLEN(args[0])
+}
+
+func (c *Controller) HandleLPOP(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) < 1 {
+		return nil, ErrInvalidArgs
+	}
+	numItem := 1
+	if len(args) == 1 {
+		argString := args[1].Data
+		parsed, err := strconv.Atoi(argString)
+		if err != nil {
+			return nil, ErrInvalidArgs
+		}
+		if parsed < 0 {
+			return nil, ErrInvalidArgs
+		}
+		numItem = parsed
+	}
+	return c.handleLPOP(args[0], numItem)
+}
+
+func (c *Controller) HandleBLPOP(args []resp.BulkStringData) (resp.Data, error) {
+	if len(args) < 2 {
+		return nil, ErrInvalidArgs
+	}
+	timeoutInSecString := args[len(args)-1].Data
+	timeoutInSec, err := strconv.ParseFloat(timeoutInSecString, 64)
+	if err != nil {
+		return nil, ErrInvalidArgs
+	}
+	timeoutInMs := timeoutInSec * 1000
+	keys := args[0 : len(args)-1]
+	return c.handleBLPOP(keys, int64(timeoutInMs))
+}
+
+// command from client only contains resp.BuildStringData, so we maintain this
+// struct for convenience.
+type command struct {
+	cmd  resp.BulkStringData
+	args []resp.BulkStringData
+}
+
+// From redis docs:
+// A client sends the Redis server an array consisting of only bulk strings.
+func parse(data resp.ArraysData) (*command, error) {
+	if data.Length < 1 {
+		return nil, ErrInvalidCmd
+	}
+	if !utils.InstanceOf[resp.BulkStringData](data.Datas[0]) {
+		return nil, ErrInvalidCmd
+	}
+	cmd := data.Datas[0].(resp.BulkStringData)
+	args := make([]resp.BulkStringData, data.Length-1)
+	for idx, arg := range data.Datas[1:] {
+		if !utils.InstanceOf[resp.BulkStringData](arg) {
+			return nil, ErrInvalidCmd
+		}
+		args[idx] = arg.(resp.BulkStringData)
+	}
+	return &command{
+		cmd:  cmd,
+		args: args,
+	}, nil
 }
