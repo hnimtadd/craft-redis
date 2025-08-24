@@ -12,23 +12,25 @@ import (
 )
 
 type (
-	List   map[string][]resp.Data
 	Record struct {
 		Data      resp.BulkStringData
 		Timeout   time.Time
 		isExpired bool
 	}
+	SetValueType string
+	Value        struct {
+		Type SetValueType
+		Data any
+	}
 )
 
 type Controller struct {
-	set  *Set[Record]
-	list *Set[BLList[resp.Data]]
+	data *Set[Value]
 }
 
 func NewController() *Controller {
 	return &Controller{
-		set:  NewBLSet[Record](nil),
-		list: NewBLSet(NewBLList[resp.Data]),
+		data: NewBLSet[Value](),
 	}
 }
 
@@ -55,7 +57,6 @@ func (c *Controller) HandleSET(cmd resp.ArraysData) (resp.Data, error) {
 		utils.InstanceOf[resp.BulkStringData](value),
 		"value must be bulk strings",
 	)
-
 	record := Record{
 		Data: value.(resp.BulkStringData),
 	}
@@ -88,8 +89,10 @@ func (c *Controller) HandleSET(cmd resp.ArraysData) (resp.Data, error) {
 		}
 	}
 
-	v, found := c.set.Set(resp.Raw(key), &record)
-	fmt.Println(v.Data.Data, found)
+	c.data.Set(resp.Raw(key), &Value{
+		Type: SetValueTypeString,
+		Data: &record,
+	})
 	return resp.SimpleStringData{Data: "OK"}, nil
 }
 
@@ -102,10 +105,14 @@ func (c *Controller) HandleGET(cmd resp.ArraysData) (resp.Data, error) {
 		utils.InstanceOf[resp.BulkStringData](key),
 		"key must be bulk strings",
 	)
-	if !c.set.Has(resp.Raw(key)) {
+	value, found := c.data.Get(resp.Raw(key))
+	if !found {
 		return resp.NullBulkStringData{}, nil
 	}
-	record, _ := c.set.Get(resp.Raw(key))
+	if value.Type != SetValueTypeString {
+		return nil, fmt.Errorf("invalid key type")
+	}
+	record := value.Data.(*Record)
 	if record.isExpired {
 		return resp.NullBulkStringData{}, nil
 	}
@@ -122,9 +129,17 @@ func (c *Controller) HandleRPUSH(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	lst, _ := c.list.Get(resp.Raw(key))
+	value, _ := c.data.Getsert(resp.Raw(key), &Value{
+		Type: SetValueTypeList,
+		Data: NewBLList[resp.Data](),
+	})
+	if value.Type != SetValueTypeList {
+		return nil, fmt.Errorf("invalid element type")
+	}
+	lst := value.Data.(*BLList[resp.Data])
 	defer lst.Signal()
 	len := lst.Append(cmd.Datas[2:]...)
+
 	return resp.Integer{Data: len}, nil
 }
 
@@ -137,9 +152,14 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 		utils.InstanceOf[resp.BulkStringData](key),
 		"key must be a bulk string",
 	)
-	if !c.list.Has(resp.Raw(key)) {
+	value, found := c.data.Get(resp.Raw(key))
+	if !found {
 		return resp.ArraysData{}, nil
 	}
+	if value.Type != SetValueTypeList {
+		return nil, fmt.Errorf("invalid element type")
+	}
+	lst := value.Data.(*BLList[resp.Data])
 	startData := cmd.Datas[2]
 	if !utils.InstanceOf[resp.BulkStringData](startData) {
 		return nil, ErrInvalidArgs
@@ -159,7 +179,6 @@ func (c *Controller) HandleLRANGE(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 
-	lst, _ := c.list.Get(resp.Raw(key))
 	var (
 		startIdx = start
 		endIdx   = end
@@ -202,7 +221,17 @@ func (c *Controller) HandleLPUSH(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	lst, _ := c.list.Get(resp.Raw(key))
+	value, found := c.data.Getsert(resp.Raw(key), &Value{
+		Type: SetValueTypeList,
+		Data: NewBLList[resp.Data](),
+	})
+	if !found {
+		return resp.ArraysData{}, nil
+	}
+	if value.Type != SetValueTypeList {
+		return nil, fmt.Errorf("invalid element type")
+	}
+	lst := value.Data.(*BLList[resp.Data])
 	defer lst.Signal()
 	// reverse so we have a list that should be exists after we add to the list
 	// then we just simply append the original list.
@@ -218,10 +247,14 @@ func (c *Controller) HandleLLEN(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	if !c.list.Has(resp.Raw(key)) {
-		return resp.Integer{}, nil
+	value, found := c.data.Get(resp.Raw(key))
+	if !found {
+		return resp.ArraysData{}, nil
 	}
-	lst, _ := c.list.Get(resp.Raw(key))
+	if value.Type != SetValueTypeList {
+		return nil, fmt.Errorf("invalid element type")
+	}
+	lst := value.Data.(*BLList[resp.Data])
 	return resp.Integer{Data: lst.Len()}, nil
 }
 
@@ -230,10 +263,14 @@ func (c *Controller) HandleLPOP(cmd resp.ArraysData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	key := cmd.Datas[1]
-	if !c.list.Has(resp.Raw(key)) {
-		return resp.BulkStringData{}, nil
+	value, found := c.data.Get(resp.Raw(key))
+	if !found {
+		return resp.ArraysData{}, nil
 	}
-	lst, _ := c.list.Get(resp.Raw(key))
+	if value.Type != SetValueTypeList {
+		return nil, fmt.Errorf("invalid element type")
+	}
+	lst := value.Data.(*BLList[resp.Data])
 	if lst.Len() == 0 {
 		return resp.BulkStringData{}, nil
 	}
@@ -308,7 +345,14 @@ func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
 
 	for _, key := range keys {
 		go func(key resp.Data) {
-			lst, _ := c.list.Get(resp.Raw(key))
+			value, _ := c.data.Getsert(resp.Raw(key), &Value{
+				Type: SetValueTypeList,
+				Data: NewBLList[resp.Data](),
+			})
+			if value.Type != SetValueTypeList {
+				return
+			}
+			lst := value.Data.(*BLList[resp.Data])
 			if lst.Len() > 0 {
 				select {
 				case doneCh <- key:
@@ -362,7 +406,14 @@ func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
 		fmt.Println(timeoutInMs)
 		select {
 		case key := <-doneCh:
-			lst, _ := c.list.Get(resp.Raw(key))
+			value, found := c.data.Get(resp.Raw(key))
+			if !found {
+				return resp.ArraysData{}, nil
+			}
+			if value.Type != SetValueTypeList {
+				return nil, fmt.Errorf("invalid element type")
+			}
+			lst := value.Data.(*BLList[resp.Data])
 			ele, err := lst.Remove(0)
 			if err != nil {
 				return nil, err
@@ -376,7 +427,14 @@ func (c *Controller) HandleBLPOP(cmd resp.ArraysData) (resp.Data, error) {
 		}
 	} else {
 		key := <-doneCh
-		lst, _ := c.list.Get(resp.Raw(key))
+		value, found := c.data.Get(resp.Raw(key))
+		if !found {
+			return resp.ArraysData{}, nil
+		}
+		if value.Type != SetValueTypeList {
+			return nil, fmt.Errorf("invalid element type")
+		}
+		lst := value.Data.(*BLList[resp.Data])
 		ele, err := lst.Remove(0)
 		if err != nil {
 			return nil, err
