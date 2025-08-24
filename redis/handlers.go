@@ -194,12 +194,12 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 		go func(key resp.Data) {
 			value, _ := c.data.Getsert(resp.Raw(key), &Value{
 				Type: SetValueTypeList,
-				Data: NewBLList[resp.Data](),
+				Data: NewBLList[resp.BulkStringData](),
 			})
 			if value.Type != SetValueTypeList {
 				return
 			}
-			lst := value.Data.(*BLList[resp.Data])
+			lst := value.Data.(*BLList[resp.BulkStringData])
 			if lst.Len() > 0 {
 				select {
 				case doneCh <- key:
@@ -250,7 +250,6 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 	defer close(cancelCh)
 
 	if timeoutInMs > 0 {
-		fmt.Println(timeoutInMs)
 		select {
 		case key := <-doneCh:
 			value, found := c.data.Get(resp.Raw(key))
@@ -260,7 +259,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 			if value.Type != SetValueTypeList {
 				return nil, fmt.Errorf("invalid element type")
 			}
-			lst := value.Data.(*BLList[resp.Data])
+			lst := value.Data.(*BLList[resp.BulkStringData])
 			ele, err := lst.Remove(0)
 			if err != nil {
 				return nil, err
@@ -281,7 +280,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 		if value.Type != SetValueTypeList {
 			return nil, fmt.Errorf("invalid element type")
 		}
-		lst := value.Data.(*BLList[resp.Data])
+		lst := value.Data.(*BLList[resp.BulkStringData])
 		ele, err := lst.Remove(0)
 		if err != nil {
 			return nil, err
