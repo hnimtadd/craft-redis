@@ -86,7 +86,7 @@ func (c *Controller) handleLPUSH(key resp.BulkStringData, values ...resp.BulkStr
 
 	// reverse so we have a list that should be exists after we add to the list
 	// then we just simply append the original list.
-	for _, data := range values[2:] {
+	for _, data := range values {
 		lst.Prepend(data)
 	}
 

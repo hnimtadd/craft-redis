@@ -147,8 +147,7 @@ func (c *Controller) HandleLPUSH(args []resp.BulkStringData) (resp.Data, error) 
 	if len(args) < 2 {
 		return nil, ErrInvalidArgs
 	}
-	key := args[0]
-	return c.handleLPUSH(key, args[1:]...)
+	return c.handleLPUSH(args[0], args[1:]...)
 }
 
 func (c *Controller) HandleLLEN(args []resp.BulkStringData) (resp.Data, error) {
