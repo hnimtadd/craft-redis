@@ -405,14 +405,17 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 	})
 	datas := make([]resp.Data, len(entries))
 	for idx, entry := range entries {
-		data := make([]resp.Data, len(entry.KVs)+1)
-		data[0] = entry.ID.Data()
+		kvsData := make([]resp.Data, len(entry.KVs))
 		for idx, ele := range entry.KVs {
-			// shift 1 idx, as idx 0 is entry ID.
-			data[idx+1] = ele
+			kvsData[idx] = ele
 		}
 		datas[idx] = resp.ArraysData{
-			Datas: data,
+			Datas: []resp.Data{
+				entry.ID.Data(),
+				resp.ArraysData{
+					Datas: kvsData,
+				},
+			},
 		}
 	}
 	return resp.ArraysData{
