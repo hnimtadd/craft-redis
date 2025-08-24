@@ -292,3 +292,11 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 		}, nil
 	}
 }
+
+func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, error) {
+	value, found := c.data.Get(resp.Raw(key))
+	if !found {
+		return resp.SimpleStringData{Data: "none"}, nil
+	}
+	return resp.SimpleStringData{Data: string(value.Type)}, nil
+}

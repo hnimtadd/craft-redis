@@ -64,13 +64,12 @@ func handleConnection(controller *redis.Controller, conn net.Conn) {
 		case resp.ArraysData:
 			res := controller.Handle(data)
 
-			fmt.Println("return", resp.Raw(res))
 			_, err := conn.Write([]byte(res.String()))
 			if err != nil {
 				fmt.Println("failed to write to conn", err)
 				return
 			}
-			fmt.Println("done")
+			fmt.Println("return", resp.Raw(res))
 		default:
 			fmt.Println("unsupported")
 		}
