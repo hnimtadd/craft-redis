@@ -41,6 +41,12 @@ func parse(data resp.ArraysData) (*command, *resp.SimpleErrorData) {
 }
 
 func parseStreamEntryID(entryID resp.BulkStringData) (int64, int64, *resp.SimpleErrorData) {
+	// early return incase we have a * entryID, that means later we need
+	// to genrate both timeID part and sequence part
+	if entryID.Data == "*" {
+		return -1, -1, nil
+	}
+
 	parts := strings.Split(entryID.Data, "-")
 	if len(parts) != 2 {
 		return 0, 0, &resp.SimpleErrorData{
