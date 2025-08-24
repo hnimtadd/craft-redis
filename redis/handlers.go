@@ -353,12 +353,13 @@ func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkString
 		}
 	}
 	stream := value.Data.(*SetValueStream)
-	if err := validteStreamEntryID(stream, entryID); err != nil {
+	validEntryID, err := fullfillStreamEntryID(stream, entryID)
+	if err != nil {
 		return nil, err
 	}
 	stream.Append(StreamEntry{
-		ID:  entryID,
+		ID:  validEntryID,
 		KVs: kvs,
 	})
-	return entryID, nil
+	return validEntryID, nil
 }
