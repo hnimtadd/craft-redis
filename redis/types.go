@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
@@ -38,11 +39,13 @@ func NewStreamValue() *SetValueStream {
 }
 
 type StreamEntry struct {
-	ID  resp.BulkStringData
-	KVs []StreamEntryKV
+	timestampMs int64
+	sequenceNum int64
+	KVs         []resp.BulkStringData
 }
 
-type StreamEntryKV struct {
-	Key   resp.BulkStringData
-	Value resp.BulkStringData
+func (e StreamEntry) ID() resp.BulkStringData {
+	return resp.BulkStringData{
+		Data: fmt.Sprintf("%d-%d", e.timestampMs, e.sequenceNum),
+	}
 }

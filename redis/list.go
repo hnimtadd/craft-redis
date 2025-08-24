@@ -147,6 +147,14 @@ func (l *BLList[T]) Subscribe(sub *Subscription) *Subscription {
 	return sub
 }
 
+func (l *BLList[T]) ForEach(fn func(*T) bool) {
+	for curr := l.data.Front(); curr != nil; curr = curr.Next() {
+		if shouldStop := fn(curr.Value.(*T)); shouldStop {
+			break
+		}
+	}
+}
+
 func (s *Subscription) Deactivate() {
 	s.deactivated = true
 }

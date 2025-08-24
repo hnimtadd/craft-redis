@@ -60,8 +60,9 @@ func parseStreamEntryID(entryID resp.BulkStringData) (int64, int64, *resp.Simple
 	case "*":
 		timestampMS = -1
 	default:
-		timestampMSUint, err := strconv.ParseUint(timestampMSString, 10, 32)
+		timestampMSUint, err := strconv.ParseUint(timestampMSString, 10, 64)
 		if err != nil {
+			fmt.Println("error")
 			return 0, 0, &resp.SimpleErrorData{
 				Type: resp.SimpleErrorTypeGeneric,
 				Msg:  "Invalid stream ID specified as stream command argument",
@@ -75,7 +76,7 @@ func parseStreamEntryID(entryID resp.BulkStringData) (int64, int64, *resp.Simple
 	case "*":
 		sequenceNum = -1
 	default:
-		sequenceNumUint, err := strconv.ParseUint(sequenceNumString, 10, 32)
+		sequenceNumUint, err := strconv.ParseUint(sequenceNumString, 10, 64)
 		if err != nil {
 			return 0, 0, &resp.SimpleErrorData{
 				Type: resp.SimpleErrorTypeGeneric,
@@ -87,13 +88,9 @@ func parseStreamEntryID(entryID resp.BulkStringData) (int64, int64, *resp.Simple
 	return timestampMS, sequenceNum, nil
 }
 
-func fullfillStreamEntryID(stream *SetValueStream, entryID resp.BulkStringData) (resp.BulkStringData, *resp.SimpleErrorData) {
-	timestampMS, sequenceNum, err := parseStreamEntryID(entryID)
-	if err != nil {
-		return resp.BulkStringData{}, err
-	}
+func fullfillStreamEntryID(stream *SetValueStream, timestampMS, sequenceNum int64) (int64, int64, *resp.SimpleErrorData) {
 	if timestampMS == 0 && sequenceNum == 0 {
-		return resp.BulkStringData{}, &resp.SimpleErrorData{
+		return -1, -1, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "The ID specified in XADD must be greater than 0-0",
 		}
@@ -116,15 +113,14 @@ func fullfillStreamEntryID(stream *SetValueStream, entryID resp.BulkStringData) 
 	default:
 		last := stream.At(stream.Len() - 1)
 
-		lastTimestampMS, lastSequenceNum, _ := parseStreamEntryID(last.ID)
-		fmt.Println("last", last.ID.Data, lastTimestampMS, lastSequenceNum)
+		lastTimestampMS, lastSequenceNum := last.timestampMs, last.sequenceNum
 		// if the current top ID in the stream has a time greater than the current
 		// local time of the instance, Redis uses the top entry time instead
 		// and increments the sequence part of the ID.
 		if timestampMS == -1 {
 			timestampMS = max(now, lastTimestampMS)
 		} else if timestampMS < lastTimestampMS {
-			return resp.BulkStringData{}, &resp.SimpleErrorData{
+			return -1, -1, &resp.SimpleErrorData{
 				Type: resp.SimpleErrorTypeGeneric,
 				Msg:  "The ID specified in XADD is equal or smaller than the target stream top item",
 			}
@@ -137,13 +133,11 @@ func fullfillStreamEntryID(stream *SetValueStream, entryID resp.BulkStringData) 
 			}
 		}
 		if timestampMS == lastTimestampMS && sequenceNum <= lastSequenceNum {
-			return resp.BulkStringData{}, &resp.SimpleErrorData{
+			return -1, -1, &resp.SimpleErrorData{
 				Type: resp.SimpleErrorTypeGeneric,
 				Msg:  "The ID specified in XADD is equal or smaller than the target stream top item",
 			}
 		}
 	}
-	return resp.BulkStringData{
-		Data: fmt.Sprintf("%d-%d", timestampMS, sequenceNum),
-	}, nil
+	return timestampMS, sequenceNum, nil
 }

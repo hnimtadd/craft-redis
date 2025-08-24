@@ -63,6 +63,9 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	case "XADD":
 		handler = c.HandleXADD
 
+	case "XRANGE":
+		handler = c.HandleXRANGE
+
 	default:
 		return resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -225,7 +228,8 @@ func (c *Controller) HandleTYPE(args []resp.BulkStringData) (resp.Data, *resp.Si
 	return c.handleTYPE(args[0])
 }
 
-// redis-cli XADD stream_key 1526919030474-0 temperature 36 humidity 95
+// HandleXADD handles stream add entry command.
+// example: redis-cli XADD stream_key 1526919030474-0 temperature 36 humidity 95
 func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 4 {
 		return nil, &resp.SimpleErrorData{
@@ -235,19 +239,49 @@ func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, *resp.Si
 	}
 
 	key := args[0]
-	streamID := args[1]
-	args = args[2:]
+	entryID := args[1]
+	kvs := args[2:]
 	// ensure we have valid kv args
 	if len(args)%2 != 0 {
 		return nil, &ErrInvalidArgs
 	}
 
-	kvs := make([]StreamEntryKV, len(args)/2)
-	for idx := 0; idx < len(args)/2; idx++ {
-		kvs[idx] = StreamEntryKV{
-			Key:   args[idx*2],
-			Value: args[idx*2+1],
+	return c.handleXADD(key, entryID, kvs)
+}
+
+// HandleXRANGE handles querying data from a stream.
+// example: redis-cli XRANGE stream_key 1526985054069 1526985054079
+func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+	// The sequence number doesn't need to be included in the start and end IDs
+	// provided to the command. If not provided, XRANGE defaults to a sequence
+	// number of 0 for the start and the maximum sequence number for the end.
+	if len(args) < 1 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'xrange' command",
 		}
 	}
-	return c.handleXADD(key, streamID, kvs)
+	key := args[0]
+	var start, end int64 = -1, -1
+	if len(args) == 3 {
+		startString := args[1].Data
+		startUint, err := strconv.ParseUint(startString, 10, 64)
+		if err != nil {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "value is out of range, must be positive",
+			}
+		}
+		endString := args[2].Data
+		endUint, err := strconv.ParseUint(endString, 10, 64)
+		if err != nil {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "value is out of range, must be positive",
+			}
+		}
+		start = int64(startUint)
+		end = int64(endUint)
+	}
+	return c.handleXRANGE(key, start, end)
 }

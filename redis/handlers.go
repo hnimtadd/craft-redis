@@ -341,7 +341,7 @@ func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, *resp.Simpl
 	return resp.SimpleStringData{Data: string(value.Type)}, nil
 }
 
-func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkStringData, kvs []StreamEntryKV) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkStringData, kvs []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	value, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeStream,
 		Data: NewStreamValue(),
@@ -353,13 +353,71 @@ func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkString
 		}
 	}
 	stream := value.Data.(*SetValueStream)
-	validEntryID, err := fullfillStreamEntryID(stream, entryID)
+
+	timestampMS, sequenceNum, err := parseStreamEntryID(entryID)
+	if err != nil {
+		return resp.BulkStringData{}, err
+	}
+	timestampMS, sequenceNum, err = fullfillStreamEntryID(stream, timestampMS, sequenceNum)
 	if err != nil {
 		return nil, err
 	}
-	stream.Append(StreamEntry{
-		ID:  validEntryID,
-		KVs: kvs,
+	entry := StreamEntry{
+		timestampMs: timestampMS,
+		sequenceNum: sequenceNum,
+		KVs:         kvs,
+	}
+	stream.Append(entry)
+	return entry.ID(), nil
+}
+
+func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end int64) (resp.Data, *resp.SimpleErrorData) {
+	value, _ := c.data.Getsert(resp.Raw(key), &Value{
+		Type: SetValueTypeStream,
+		Data: NewStreamValue(),
 	})
-	return validEntryID, nil
+	if value.Type != SetValueTypeStream {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  "Operation against a key holding the wrong kind of value",
+		}
+	}
+	stream := value.Data.(*SetValueStream)
+	if stream.Len() == 0 {
+		return resp.ArraysData{}, nil
+	}
+	if start == -1 {
+		start = 0
+	}
+	if end == -1 {
+		lastElement := stream.At(stream.Len() - 1)
+		end = lastElement.timestampMs
+	}
+	entries := []StreamEntry{}
+	stream.ForEach(func(se *StreamEntry) bool {
+		fmt.Println(start, end, se.timestampMs)
+		if start <= se.timestampMs && se.timestampMs <= end {
+			entries = append(entries, *se)
+			return false
+		}
+		if se.timestampMs > end {
+			return true
+		}
+		return false
+	})
+	datas := make([]resp.Data, len(entries))
+	for idx, entry := range entries {
+		data := make([]resp.Data, len(entry.KVs)+1)
+		data[0] = entry.ID()
+		for idx, ele := range entry.KVs {
+			// shift 1 idx, as idx 0 is entry ID.
+			data[idx+1] = ele
+		}
+		datas[idx] = resp.ArraysData{
+			Datas: data,
+		}
+	}
+	return resp.ArraysData{
+		Datas: datas,
+	}, nil
 }
