@@ -64,8 +64,9 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "TYPE":
 		handler = c.HandleType
-	// case "XADD"
-	// 	handler = c.HandleXADD
+
+	case "XADD":
+		handler = c.HandleXADD
 
 	default:
 		return resp.SimpleErrorData{
@@ -184,6 +185,26 @@ func (c *Controller) HandleType(args []resp.BulkStringData) (resp.Data, error) {
 	return c.handleTYPE(args[0])
 }
 
+// redis-cli XADD stream_key 1526919030474-0 temperature 36 humidity 95
 func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, error) {
-	return nil, nil
+	if len(args) < 4 {
+		return nil, ErrInvalidArgs
+	}
+
+	key := args[0]
+	streamID := args[1]
+	args = args[2:]
+	// ensure we have valid kv args
+	if len(args)%2 != 0 {
+		return nil, ErrInvalidArgs
+	}
+
+	kvs := make([]StreamEntryKV, len(args)/2)
+	for idx := 0; idx < len(args)/2; idx++ {
+		kvs[idx] = StreamEntryKV{
+			Key:   args[idx*2],
+			Value: args[idx*2+1],
+		}
+	}
+	return c.handleXADD(key, streamID, kvs)
 }

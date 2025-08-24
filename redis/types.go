@@ -15,16 +15,34 @@ type (
 	}
 )
 
-type StringValue struct {
-	Data      resp.BulkStringData
-	Timeout   time.Time
-	isExpired bool
+type (
+	SetValueString struct {
+		Data      resp.BulkStringData
+		Timeout   time.Time
+		isExpired bool
+	}
+	SetValueList struct {
+		*BLList[resp.BulkStringData]
+	}
+	SetValueStream struct {
+		*BLList[StreamEntry]
+	}
+)
+
+func NewListValue() *SetValueList {
+	return &SetValueList{NewBLList[resp.BulkStringData]()}
 }
 
-type ListValue struct {
-	*BLList[resp.BulkStringData]
+func NewStreamValue() *SetValueStream {
+	return &SetValueStream{NewBLList[StreamEntry]()}
 }
 
-func NewListValue() *ListValue {
-	return &ListValue{NewBLList[resp.BulkStringData]()}
+type StreamEntry struct {
+	ID  resp.BulkStringData
+	KVs []StreamEntryKV
+}
+
+type StreamEntryKV struct {
+	Key   resp.BulkStringData
+	Value resp.BulkStringData
 }

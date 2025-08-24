@@ -13,7 +13,7 @@ func (c *Controller) handleSet(key resp.BulkStringData, value resp.BulkStringDat
 	if len(opts)%2 != 0 {
 		return nil, ErrInvalidArgs
 	}
-	record := StringValue{
+	record := SetValueString{
 		Data: value,
 	}
 	if len(opts) > 0 {
@@ -46,7 +46,7 @@ func (c *Controller) handleGet(key resp.BulkStringData) (resp.Data, error) {
 	if valueData.Type != SetValueTypeString {
 		return nil, ErrInvalidArgs
 	}
-	record := valueData.Data.(*StringValue)
+	record := valueData.Data.(*SetValueString)
 	if record.isExpired {
 		return resp.NullBulkStringData{}, nil
 	}
@@ -66,7 +66,7 @@ func (c *Controller) handleRPUSH(key resp.BulkStringData, values ...resp.BulkStr
 	if valueData.Type != SetValueTypeList {
 		return nil, ErrInvalidArgs
 	}
-	lst := valueData.Data.(*ListValue)
+	lst := valueData.Data.(*SetValueList)
 	defer lst.Signal()
 	len := lst.Append(values...)
 
@@ -81,7 +81,7 @@ func (c *Controller) handleLPUSH(key resp.BulkStringData, values ...resp.BulkStr
 	if value.Type != SetValueTypeList {
 		return nil, fmt.Errorf("invalid element type")
 	}
-	lst := value.Data.(*ListValue)
+	lst := value.Data.(*SetValueList)
 	defer lst.Signal()
 
 	// reverse so we have a list that should be exists after we add to the list
@@ -101,7 +101,7 @@ func (c *Controller) handleLRANGE(key resp.BulkStringData, from, to int) (resp.D
 	if valueData.Type != SetValueTypeList {
 		return nil, ErrInvalidArgs
 	}
-	lst := valueData.Data.(*ListValue)
+	lst := valueData.Data.(*SetValueList)
 	if from < 0 {
 		from = lst.Len() + from
 		from = max(from, 0)
@@ -144,7 +144,7 @@ func (c *Controller) handleLLEN(key resp.BulkStringData) (resp.Data, error) {
 	if value.Type != SetValueTypeList {
 		return nil, fmt.Errorf("element is not a list")
 	}
-	lst := value.Data.(*ListValue)
+	lst := value.Data.(*SetValueList)
 	return resp.Integer{Data: lst.Len()}, nil
 }
 
@@ -156,7 +156,7 @@ func (c *Controller) handleLPOP(key resp.BulkStringData, numItem int) (resp.Data
 	if value.Type != SetValueTypeList {
 		return nil, fmt.Errorf("invalid element type")
 	}
-	lst := value.Data.(*ListValue)
+	lst := value.Data.(*SetValueList)
 	if lst.Len() == 0 {
 		return resp.BulkStringData{}, nil
 	}
@@ -199,7 +199,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 			if value.Type != SetValueTypeList {
 				return
 			}
-			lst := value.Data.(*ListValue)
+			lst := value.Data.(*SetValueList)
 			if lst.Len() > 0 {
 				select {
 				case doneCh <- key:
@@ -257,9 +257,9 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 				return resp.ArraysData{}, nil
 			}
 			if value.Type != SetValueTypeList {
-				return nil, fmt.Errorf("invalid element type")
+				return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
 			}
-			lst := value.Data.(*ListValue)
+			lst := value.Data.(*SetValueList)
 			ele, err := lst.Remove(0)
 			if err != nil {
 				return nil, err
@@ -280,7 +280,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 		if value.Type != SetValueTypeList {
 			return nil, fmt.Errorf("invalid element type")
 		}
-		lst := value.Data.(*ListValue)
+		lst := value.Data.(*SetValueList)
 		ele, err := lst.Remove(0)
 		if err != nil {
 			return nil, err
@@ -298,4 +298,20 @@ func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, error) {
 		return resp.SimpleStringData{Data: "none"}, nil
 	}
 	return resp.SimpleStringData{Data: string(value.Type)}, nil
+}
+
+func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkStringData, kvs []StreamEntryKV) (resp.Data, error) {
+	value, _ := c.data.Getsert(resp.Raw(key), &Value{
+		Type: SetValueTypeStream,
+		Data: NewStreamValue(),
+	})
+	if value.Type != SetValueTypeStream {
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	stream := value.Data.(*SetValueStream)
+	stream.Append(StreamEntry{
+		ID:  entryID,
+		KVs: kvs,
+	})
+	return entryID, nil
 }
