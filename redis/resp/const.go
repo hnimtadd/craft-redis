@@ -25,3 +25,10 @@ const (
 	TypeSets            DataType = '~'
 	TypePushes          DataType = '>'
 )
+
+type SimpleErrorType string
+
+const (
+	SimpleErrorTypeGeneric   SimpleErrorType = "ERR"
+	SimpleErrorTypeWrongType SimpleErrorType = "WRONGTYPE"
+)

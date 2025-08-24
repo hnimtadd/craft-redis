@@ -24,7 +24,8 @@ type (
 		Datas  []Data
 	}
 	SimpleErrorData struct {
-		Msg string
+		Type SimpleErrorType
+		Msg  string
 	}
 	Integer struct {
 		Data int
@@ -54,7 +55,7 @@ func (d ArraysData) String() string {
 }
 
 func (d SimpleErrorData) String() string {
-	return fmt.Sprintf("-ERR %s", d.Msg)
+	return fmt.Sprintf("-%s %s\r\n", d.Type, d.Msg)
 }
 
 func Raw(data Data) string {

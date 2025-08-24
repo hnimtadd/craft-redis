@@ -309,6 +309,9 @@ func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkString
 		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
 	}
 	stream := value.Data.(*SetValueStream)
+	if err := validteStreamEntryID(stream, entryID); err != nil {
+		return nil, err
+	}
 	stream.Append(StreamEntry{
 		ID:  entryID,
 		KVs: kvs,

@@ -70,13 +70,17 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	default:
 		return resp.SimpleErrorData{
-			Msg: "NOT SUPPORTED COMMAND",
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "NOT SUPPORTED COMMAND",
 			// todo data
 		}
 	}
 	res, err := handler(cmd.args)
 	if err != nil {
-		return resp.SimpleErrorData{Msg: err.Error()}
+		return resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  err.Error(),
+		}
 	}
 	return res
 }

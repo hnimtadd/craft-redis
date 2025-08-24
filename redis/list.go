@@ -33,6 +33,7 @@ func (l *BLList[T]) get(idx uint) *list.Element {
 		rOffset = l.data.Len() - 1 - int(idx)
 		node    *list.Element
 	)
+	fmt.Println(lOffset, rOffset)
 
 	switch {
 	case rOffset < lOffset:
@@ -65,6 +66,9 @@ func (l *BLList[T]) Prepend(value T) int {
 }
 
 func (l *BLList[T]) At(idx int) *T {
+	if idx < 0 {
+		return nil
+	}
 	if idx >= l.data.Len() {
 		panic("out of length")
 	}
