@@ -13,7 +13,7 @@ func (c *Controller) handleSet(key resp.BulkStringData, value resp.BulkStringDat
 	if len(opts)%2 != 0 {
 		return nil, ErrInvalidArgs
 	}
-	record := Record{
+	record := StringValue{
 		Data: value,
 	}
 	if len(opts) > 0 {
@@ -46,7 +46,7 @@ func (c *Controller) handleGet(key resp.BulkStringData) (resp.Data, error) {
 	if valueData.Type != SetValueTypeString {
 		return nil, ErrInvalidArgs
 	}
-	record := valueData.Data.(*Record)
+	record := valueData.Data.(*StringValue)
 	if record.isExpired {
 		return resp.NullBulkStringData{}, nil
 	}
@@ -61,12 +61,12 @@ func (c *Controller) handleGet(key resp.BulkStringData) (resp.Data, error) {
 func (c *Controller) handleRPUSH(key resp.BulkStringData, values ...resp.BulkStringData) (resp.Data, error) {
 	valueData, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeList,
-		Data: NewBLList[resp.BulkStringData](),
+		Data: NewListValue(),
 	})
 	if valueData.Type != SetValueTypeList {
 		return nil, ErrInvalidArgs
 	}
-	lst := valueData.Data.(*BLList[resp.BulkStringData])
+	lst := valueData.Data.(*ListValue)
 	defer lst.Signal()
 	len := lst.Append(values...)
 
@@ -76,12 +76,12 @@ func (c *Controller) handleRPUSH(key resp.BulkStringData, values ...resp.BulkStr
 func (c *Controller) handleLPUSH(key resp.BulkStringData, values ...resp.BulkStringData) (resp.Data, error) {
 	value, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeList,
-		Data: NewBLList[resp.BulkStringData](),
+		Data: NewListValue(),
 	})
 	if value.Type != SetValueTypeList {
 		return nil, fmt.Errorf("invalid element type")
 	}
-	lst := value.Data.(*BLList[resp.BulkStringData])
+	lst := value.Data.(*ListValue)
 	defer lst.Signal()
 
 	// reverse so we have a list that should be exists after we add to the list
@@ -101,7 +101,7 @@ func (c *Controller) handleLRANGE(key resp.BulkStringData, from, to int) (resp.D
 	if valueData.Type != SetValueTypeList {
 		return nil, ErrInvalidArgs
 	}
-	lst := valueData.Data.(*BLList[resp.BulkStringData])
+	lst := valueData.Data.(*ListValue)
 	if from < 0 {
 		from = lst.Len() + from
 		from = max(from, 0)
@@ -144,7 +144,7 @@ func (c *Controller) handleLLEN(key resp.BulkStringData) (resp.Data, error) {
 	if value.Type != SetValueTypeList {
 		return nil, fmt.Errorf("element is not a list")
 	}
-	lst := value.Data.(*BLList[resp.BulkStringData])
+	lst := value.Data.(*ListValue)
 	return resp.Integer{Data: lst.Len()}, nil
 }
 
@@ -156,7 +156,7 @@ func (c *Controller) handleLPOP(key resp.BulkStringData, numItem int) (resp.Data
 	if value.Type != SetValueTypeList {
 		return nil, fmt.Errorf("invalid element type")
 	}
-	lst := value.Data.(*BLList[resp.BulkStringData])
+	lst := value.Data.(*ListValue)
 	if lst.Len() == 0 {
 		return resp.BulkStringData{}, nil
 	}
@@ -194,12 +194,12 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 		go func(key resp.Data) {
 			value, _ := c.data.Getsert(resp.Raw(key), &Value{
 				Type: SetValueTypeList,
-				Data: NewBLList[resp.BulkStringData](),
+				Data: NewListValue(),
 			})
 			if value.Type != SetValueTypeList {
 				return
 			}
-			lst := value.Data.(*BLList[resp.BulkStringData])
+			lst := value.Data.(*ListValue)
 			if lst.Len() > 0 {
 				select {
 				case doneCh <- key:
@@ -259,7 +259,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 			if value.Type != SetValueTypeList {
 				return nil, fmt.Errorf("invalid element type")
 			}
-			lst := value.Data.(*BLList[resp.BulkStringData])
+			lst := value.Data.(*ListValue)
 			ele, err := lst.Remove(0)
 			if err != nil {
 				return nil, err
@@ -280,7 +280,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 		if value.Type != SetValueTypeList {
 			return nil, fmt.Errorf("invalid element type")
 		}
-		lst := value.Data.(*BLList[resp.BulkStringData])
+		lst := value.Data.(*ListValue)
 		ele, err := lst.Remove(0)
 		if err != nil {
 			return nil, err

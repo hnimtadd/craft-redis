@@ -3,24 +3,9 @@ package redis
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
 	"github.com/codecrafters-io/redis-starter-go/utils"
-)
-
-type (
-	Record struct {
-		Data      resp.BulkStringData
-		Timeout   time.Time
-		isExpired bool
-	}
-	SetValueType    string
-	SetValuePayload any
-	Value           struct {
-		Type SetValueType
-		Data SetValuePayload
-	}
 )
 
 type Controller struct {
@@ -79,6 +64,8 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "TYPE":
 		handler = c.HandleType
+	// case "XADD"
+	// 	handler = c.HandleXADD
 
 	default:
 		return resp.SimpleErrorData{
@@ -195,4 +182,8 @@ func (c *Controller) HandleType(args []resp.BulkStringData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	return c.handleTYPE(args[0])
+}
+
+func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, error) {
+	return nil, nil
 }
