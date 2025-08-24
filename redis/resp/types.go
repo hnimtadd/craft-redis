@@ -15,13 +15,11 @@ type (
 		Data string
 	}
 	BulkStringData struct {
-		Length int
-		Data   string
+		Data string
 	}
 	NullBulkStringData struct{}
 	ArraysData         struct {
-		Length int
-		Datas  []Data
+		Datas []Data
 	}
 	SimpleErrorData struct {
 		Type SimpleErrorType
@@ -37,7 +35,7 @@ func (d SimpleStringData) String() string {
 }
 
 func (d BulkStringData) String() string {
-	return fmt.Sprintf("%s%d%s%s%s", string(TypeBulkString), d.Length, Terminator, d.Data, Terminator)
+	return fmt.Sprintf("%s%d%s%s%s", string(TypeBulkString), len(d.Data), Terminator, d.Data, Terminator)
 }
 
 func (d NullBulkStringData) String() string {
@@ -47,7 +45,7 @@ func (d NullBulkStringData) String() string {
 func (d ArraysData) String() string {
 	builder := new(strings.Builder)
 	builder.WriteByte(byte(TypeArrays))
-	fmt.Fprintf(builder, "%d%s", d.Length, string(Terminator))
+	fmt.Fprintf(builder, "%d%s", len(d.Datas), string(Terminator))
 	for ele := range slices.Values(d.Datas) {
 		builder.WriteString(ele.String())
 	}

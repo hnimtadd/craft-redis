@@ -68,8 +68,7 @@ func (p Parser) ParseBulkStrings(input []byte) (Data, int, error) {
 
 	nextIdx := dataEndIdx + len(string(Terminator))
 	return BulkStringData{
-		Length: respLength,
-		Data:   string(data),
+		Data: string(data),
 	}, nextIdx, nil
 }
 
@@ -101,7 +100,6 @@ func (p Parser) ParseArrays(input []byte) (Data, int, error) {
 	}
 
 	return ArraysData{
-		Length: elesNum,
-		Datas:  datas,
+		Datas: datas,
 	}, nextIdx, nil
 }

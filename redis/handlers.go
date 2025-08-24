@@ -9,9 +9,12 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
 )
 
-func (c *Controller) handleSet(key resp.BulkStringData, value resp.BulkStringData, opts ...resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) handleSet(key resp.BulkStringData, value resp.BulkStringData, opts ...resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(opts)%2 != 0 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "syntax error",
+		}
 	}
 	record := SetValueString{
 		Data: value,
@@ -25,7 +28,10 @@ func (c *Controller) handleSet(key resp.BulkStringData, value resp.BulkStringDat
 				// valIdx is 0-based
 				ttlInMs, err := strconv.ParseInt(optVal.Data, 10, 64)
 				if err != nil {
-					return nil, ErrInvalidArgs
+					return nil, &resp.SimpleErrorData{
+						Type: resp.SimpleErrorTypeGeneric,
+						Msg:  "invalid expire time in 'set' command",
+					}
 				}
 				record.Timeout = time.Now().Add(time.Millisecond * time.Duration(ttlInMs))
 			}
@@ -38,13 +44,16 @@ func (c *Controller) handleSet(key resp.BulkStringData, value resp.BulkStringDat
 	return resp.SimpleStringData{Data: "OK"}, nil
 }
 
-func (c *Controller) handleGet(key resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) handleGet(key resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	valueData, found := c.data.Get(resp.Raw(key))
 	if !found {
 		return resp.NullBulkStringData{}, nil
 	}
 	if valueData.Type != SetValueTypeString {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+		}
 	}
 	record := valueData.Data.(*SetValueString)
 	if record.isExpired {
@@ -58,13 +67,16 @@ func (c *Controller) handleGet(key resp.BulkStringData) (resp.Data, error) {
 	return record.Data, nil
 }
 
-func (c *Controller) handleRPUSH(key resp.BulkStringData, values ...resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) handleRPUSH(key resp.BulkStringData, values ...resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	valueData, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeList,
 		Data: NewListValue(),
 	})
 	if valueData.Type != SetValueTypeList {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+		}
 	}
 	lst := valueData.Data.(*SetValueList)
 	defer lst.Signal()
@@ -73,13 +85,16 @@ func (c *Controller) handleRPUSH(key resp.BulkStringData, values ...resp.BulkStr
 	return resp.Integer{Data: len}, nil
 }
 
-func (c *Controller) handleLPUSH(key resp.BulkStringData, values ...resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) handleLPUSH(key resp.BulkStringData, values ...resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	value, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeList,
 		Data: NewListValue(),
 	})
 	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+		}
 	}
 	lst := value.Data.(*SetValueList)
 	defer lst.Signal()
@@ -93,13 +108,16 @@ func (c *Controller) handleLPUSH(key resp.BulkStringData, values ...resp.BulkStr
 	return resp.Integer{Data: lst.Len()}, nil
 }
 
-func (c *Controller) handleLRANGE(key resp.BulkStringData, from, to int) (resp.Data, error) {
+func (c *Controller) handleLRANGE(key resp.BulkStringData, from, to int) (resp.Data, *resp.SimpleErrorData) {
 	valueData, found := c.data.Get(resp.Raw(key))
 	if !found {
 		return resp.ArraysData{}, nil
 	}
 	if valueData.Type != SetValueTypeList {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+		}
 	}
 	lst := valueData.Data.(*SetValueList)
 	if from < 0 {
@@ -124,37 +142,45 @@ func (c *Controller) handleLRANGE(key resp.BulkStringData, from, to int) (resp.D
 	// so we get slice with [from, to+1)
 	eles, err := lst.Slice(uint(from), uint(to+1))
 	if err != nil {
-		return nil, fmt.Errorf("cannot get element: %v", err)
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("cannot get element: %v", err),
+		}
 	}
 	results := make([]resp.Data, len(eles))
 	for idx, ele := range eles {
 		results[idx] = *ele
 	}
 	return resp.ArraysData{
-		Length: to - from + 1,
-		Datas:  results,
+		Datas: results,
 	}, nil
 }
 
-func (c *Controller) handleLLEN(key resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) handleLLEN(key resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	value, found := c.data.Get(resp.Raw(key))
 	if !found {
 		return resp.Integer{Data: 0}, nil
 	}
 	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("element is not a list")
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+		}
 	}
 	lst := value.Data.(*SetValueList)
 	return resp.Integer{Data: lst.Len()}, nil
 }
 
-func (c *Controller) handleLPOP(key resp.BulkStringData, numItem int) (resp.Data, error) {
+func (c *Controller) handleLPOP(key resp.BulkStringData, numItem uint64) (resp.Data, *resp.SimpleErrorData) {
 	value, found := c.data.Get(resp.Raw(key))
 	if !found {
 		return resp.ArraysData{}, nil
 	}
 	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+		}
 	}
 	lst := value.Data.(*SetValueList)
 	if lst.Len() == 0 {
@@ -165,33 +191,38 @@ func (c *Controller) handleLPOP(key resp.BulkStringData, numItem int) (resp.Data
 	case 1:
 		popItem, err := lst.Remove(0)
 		if err != nil {
-			return nil, err
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  fmt.Sprintf("Failed to remove element %v", err),
+			}
 		}
 		return *popItem, nil
 	default:
-		numItem = min(numItem, lst.Len())
+		numItem = min(numItem, uint64(lst.Len()))
 		popItems := make([]resp.Data, numItem)
 
 		for idx := range numItem {
 			popItem, err := lst.Remove(0)
 			if err != nil {
-				return nil, err
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeGeneric,
+					Msg:  fmt.Sprintf("Failed to remove element %v", err),
+				}
 			}
 			popItems[idx] = *popItem
 		}
 
 		return resp.ArraysData{
-			Length: numItem,
-			Datas:  popItems,
+			Datas: popItems,
 		}, nil
 	}
 }
 
-func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) (resp.Data, error) {
+func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) (resp.Data, *resp.SimpleErrorData) {
 	cancelCh := make(chan any)
-	doneCh := make(chan resp.Data, 1)
+	doneCh := make(chan resp.BulkStringData, 1)
 	for _, keyData := range keys {
-		go func(key resp.Data) {
+		go func(key resp.BulkStringData) {
 			value, _ := c.data.Getsert(resp.Raw(key), &Value{
 				Type: SetValueTypeList,
 				Data: NewListValue(),
@@ -257,16 +288,21 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 				return resp.ArraysData{}, nil
 			}
 			if value.Type != SetValueTypeList {
-				return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeWrongType,
+					Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+				}
 			}
 			lst := value.Data.(*SetValueList)
 			ele, err := lst.Remove(0)
 			if err != nil {
-				return nil, err
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeGeneric,
+					Msg:  fmt.Sprintf("Failed to remove element %v", err),
+				}
 			}
 			return resp.ArraysData{
-				Length: 2,
-				Datas:  []resp.Data{key, *ele},
+				Datas: []resp.Data{key, *ele},
 			}, nil
 		case <-time.After(time.Duration(timeoutInMs) * time.Millisecond):
 			return resp.NullBulkStringData{}, nil
@@ -278,21 +314,26 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 			return resp.ArraysData{}, nil
 		}
 		if value.Type != SetValueTypeList {
-			return nil, fmt.Errorf("invalid element type")
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeWrongType,
+				Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+			}
 		}
 		lst := value.Data.(*SetValueList)
 		ele, err := lst.Remove(0)
 		if err != nil {
-			return nil, err
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  fmt.Sprintf("Failed to remove element %v", err),
+			}
 		}
 		return resp.ArraysData{
-			Length: 2,
-			Datas:  []resp.Data{key, *ele},
+			Datas: []resp.Data{key, *ele},
 		}, nil
 	}
 }
 
-func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	value, found := c.data.Get(resp.Raw(key))
 	if !found {
 		return resp.SimpleStringData{Data: "none"}, nil
@@ -300,13 +341,16 @@ func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, error) {
 	return resp.SimpleStringData{Data: string(value.Type)}, nil
 }
 
-func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkStringData, kvs []StreamEntryKV) (resp.Data, error) {
+func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkStringData, kvs []StreamEntryKV) (resp.Data, *resp.SimpleErrorData) {
 	value, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeStream,
 		Data: NewStreamValue(),
 	})
 	if value.Type != SetValueTypeStream {
-		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  "Operation against a key holding the wrong kind of value",
+		}
 	}
 	stream := value.Data.(*SetValueStream)
 	if err := validteStreamEntryID(stream, entryID); err != nil {

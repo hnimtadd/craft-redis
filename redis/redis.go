@@ -1,11 +1,11 @@
 package redis
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
-	"github.com/codecrafters-io/redis-starter-go/utils"
 )
 
 type Controller struct {
@@ -19,18 +19,13 @@ func NewController() *Controller {
 }
 
 func (c *Controller) Handle(data resp.ArraysData) resp.Data {
-	utils.Assert(
-		utils.InstanceOf[resp.BulkStringData](data.Datas[0]),
-		"command must be a bulk string",
-	)
-
 	cmd, err := parse(data)
 	if err != nil {
-		return resp.SimpleErrorData{Msg: err.Error()}
+		return err
 	}
 
-	var handler func([]resp.BulkStringData) (resp.Data, error)
-	switch cmd := strings.ToUpper(cmd.cmd.Data); cmd {
+	var handler func([]resp.BulkStringData) (resp.Data, *resp.SimpleErrorData)
+	switch strings.ToUpper(cmd.cmd.Data) {
 
 	case "ECHO":
 		handler = c.HandleECHO
@@ -63,7 +58,7 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 		handler = c.HandleBLPOP
 
 	case "TYPE":
-		handler = c.HandleType
+		handler = c.HandleTYPE
 
 	case "XADD":
 		handler = c.HandleXADD
@@ -71,128 +66,172 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	default:
 		return resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
-			Msg:  "NOT SUPPORTED COMMAND",
-			// todo data
+			Msg:  fmt.Sprintf("unknown command '%s'", cmd.cmd.Data),
 		}
 	}
 	res, err := handler(cmd.args)
 	if err != nil {
-		return resp.SimpleErrorData{
-			Type: resp.SimpleErrorTypeGeneric,
-			Msg:  err.Error(),
-		}
+		return err
 	}
 	return res
 }
 
-func (c *Controller) HandleECHO(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleECHO(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) == 0 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'echo' command",
+		}
 	}
 	return args[0], nil
 }
 
-func (c *Controller) HandlePING(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandlePING(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	return resp.SimpleStringData{Data: "PONG"}, nil
 }
 
-func (c *Controller) HandleSET(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleSET(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'set' command",
+		}
 	}
 	return c.handleSet(args[0], args[1], args[2:]...)
 }
 
-func (c *Controller) HandleGET(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleGET(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 1 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'get' command",
+		}
 	}
 	return c.handleGet(args[0])
 }
 
-func (c *Controller) HandleRPUSH(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleRPUSH(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'rpush' command",
+		}
 	}
 	return c.handleRPUSH(args[0], args[1:]...)
 }
 
-func (c *Controller) HandleLRANGE(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleLRANGE(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 3 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'lrange' command",
+		}
 	}
 	keyData := args[0]
 	fromString := args[1].Data
 	toString := args[2].Data
-	from, err := strconv.Atoi(fromString)
+	from, err := strconv.ParseInt(fromString, 10, 32)
 	if err != nil {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "value is not an integer or out of range",
+		}
 	}
-	to, err := strconv.Atoi(toString)
+	to, err := strconv.ParseInt(toString, 10, 32)
 	if err != nil {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "value is not an integer or out of range",
+		}
 	}
-	return c.handleLRANGE(keyData, from, to)
+	return c.handleLRANGE(keyData, int(from), int(to))
 }
 
-func (c *Controller) HandleLPUSH(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleLPUSH(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'lpush' command",
+		}
 	}
 	return c.handleLPUSH(args[0], args[1:]...)
 }
 
-func (c *Controller) HandleLLEN(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleLLEN(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 1 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'llen' command",
+		}
 	}
 	return c.handleLLEN(args[0])
 }
 
-func (c *Controller) HandleLPOP(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleLPOP(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 1 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'lpop' command",
+		}
 	}
-	numItem := 1
+	var numItem uint64 = 1
 	if len(args) == 2 {
 		argString := args[1].Data
-		parsed, err := strconv.Atoi(argString)
-		if err != nil {
-			return nil, ErrInvalidArgs
-		}
-		if parsed < 0 {
-			return nil, ErrInvalidArgs
+		parsed, err := strconv.ParseUint(argString, 10, 64)
+		if err != nil || parsed < 0 {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "value is out of range, must be positive",
+			}
 		}
 		numItem = parsed
 	}
 	return c.handleLPOP(args[0], numItem)
 }
 
-func (c *Controller) HandleBLPOP(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleBLPOP(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'blpop' command",
+		}
 	}
 	timeoutInSecString := args[len(args)-1].Data
 	timeoutInSec, err := strconv.ParseFloat(timeoutInSecString, 64)
 	if err != nil {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "timeout is not a float or out of range",
+		}
+	}
+	if timeoutInSec < 0 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "timeout is negative",
+		}
 	}
 	timeoutInMs := timeoutInSec * 1000
 	keys := args[0 : len(args)-1]
 	return c.handleBLPOP(keys, int64(timeoutInMs))
 }
 
-func (c *Controller) HandleType(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleTYPE(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 1 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'type' command",
+		}
 	}
 	return c.handleTYPE(args[0])
 }
 
 // redis-cli XADD stream_key 1526919030474-0 temperature 36 humidity 95
-func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, error) {
+func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 4 {
-		return nil, ErrInvalidArgs
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'xadd' command",
+		}
 	}
 
 	key := args[0]
@@ -200,7 +239,7 @@ func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, error) {
 	args = args[2:]
 	// ensure we have valid kv args
 	if len(args)%2 != 0 {
-		return nil, ErrInvalidArgs
+		return nil, &ErrInvalidArgs
 	}
 
 	kvs := make([]StreamEntryKV, len(args)/2)

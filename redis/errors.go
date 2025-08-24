@@ -1,8 +1,16 @@
 package redis
 
-import "errors"
+import (
+	"github.com/codecrafters-io/redis-starter-go/redis/resp"
+)
 
 var (
-	ErrInvalidArgs error = errors.New("invalid args")
-	ErrInvalidCmd  error = errors.New("invalid cmd")
+	ErrInvalidArgs = resp.SimpleErrorData{
+		Type: resp.SimpleErrorTypeGeneric,
+		Msg:  "invalid args",
+	}
+	ErrInvalidCmd = resp.SimpleErrorData{
+		Type: resp.SimpleErrorTypeGeneric,
+		Msg:  "invalid cmd",
+	}
 )

@@ -45,8 +45,7 @@ func TestParserArrays(t *testing.T) {
 			input:         []byte(`*0\r\n`),
 			expectedError: false,
 			expectedData: &ArraysData{
-				Length: 0,
-				Datas:  []GeneralData{},
+				Datas: []GeneralData{},
 			},
 		},
 		{
