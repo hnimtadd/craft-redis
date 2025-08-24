@@ -139,12 +139,12 @@ func (c *Controller) handleLRANGE(key resp.BulkStringData, from, to int) (resp.D
 func (c *Controller) handleLLEN(key resp.BulkStringData) (resp.Data, error) {
 	value, found := c.data.Get(resp.Raw(key))
 	if !found {
-		return resp.ArraysData{}, nil
+		return resp.Integer{Data: 0}, nil
 	}
 	if value.Type != SetValueTypeList {
-		return nil, fmt.Errorf("invalid element type")
+		return nil, fmt.Errorf("element is not a list")
 	}
-	lst := value.Data.(*BLList[resp.Data])
+	lst := value.Data.(*BLList[resp.BulkStringData])
 	return resp.Integer{Data: lst.Len()}, nil
 }
 
