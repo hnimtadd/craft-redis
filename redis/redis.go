@@ -163,7 +163,7 @@ func (c *Controller) HandleLPOP(args []resp.BulkStringData) (resp.Data, error) {
 		return nil, ErrInvalidArgs
 	}
 	numItem := 1
-	if len(args) == 1 {
+	if len(args) == 2 {
 		argString := args[1].Data
 		parsed, err := strconv.Atoi(argString)
 		if err != nil {
