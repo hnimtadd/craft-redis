@@ -39,13 +39,35 @@ func NewStreamValue() *SetValueStream {
 }
 
 type StreamEntry struct {
-	timestampMs int64
-	sequenceNum int64
-	KVs         []resp.BulkStringData
+	ID  EntryID
+	KVs []resp.BulkStringData
 }
 
-func (e StreamEntry) ID() resp.BulkStringData {
+type EntryID struct {
+	timestampMS int64
+	sequenceNum int64
+}
+
+func (e EntryID) Data() resp.BulkStringData {
 	return resp.BulkStringData{
-		Data: fmt.Sprintf("%d-%d", e.timestampMs, e.sequenceNum),
+		Data: fmt.Sprintf("%d-%d", e.timestampMS, e.sequenceNum),
 	}
+}
+
+func (e EntryID) Cmp(o EntryID) int {
+	if e.timestampMS > o.timestampMS {
+		return 1
+	} else if e.timestampMS < o.timestampMS {
+		return -1
+	}
+	if e.sequenceNum > o.sequenceNum {
+		return 1
+	} else if e.sequenceNum < o.sequenceNum {
+		return -1
+	}
+	return 0
+}
+
+func (e EntryID) IsZero() bool {
+	return e.timestampMS == -1 && e.sequenceNum == -1
 }

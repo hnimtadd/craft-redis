@@ -2,6 +2,7 @@ package redis
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -246,7 +247,12 @@ func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, *resp.Si
 		return nil, &ErrInvalidArgs
 	}
 
-	return c.handleXADD(key, entryID, kvs)
+	id, err := parseStreamEntryID(entryID)
+	if err != nil {
+		return resp.BulkStringData{}, err
+	}
+
+	return c.handleXADD(key, id, kvs)
 }
 
 // HandleXRANGE handles querying data from a stream.
@@ -262,26 +268,38 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 		}
 	}
 	key := args[0]
-	var start, end int64 = -1, -1
+	var start, end EntryID
+	var err *resp.SimpleErrorData
 	if len(args) == 3 {
-		startString := args[1].Data
-		startUint, err := strconv.ParseUint(startString, 10, 64)
+		start, err = parseStreamEntryID(args[1])
 		if err != nil {
-			return nil, &resp.SimpleErrorData{
-				Type: resp.SimpleErrorTypeGeneric,
-				Msg:  "value is out of range, must be positive",
+			startUint, err := strconv.ParseUint(args[1].Data, 10, 64)
+			if err != nil {
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeGeneric,
+					Msg:  "value is out of range, must be positive",
+				}
+			}
+			start = EntryID{
+				timestampMS: int64(startUint),
+				sequenceNum: 0,
 			}
 		}
-		endString := args[2].Data
-		endUint, err := strconv.ParseUint(endString, 10, 64)
+
+		end, err = parseStreamEntryID(args[2])
 		if err != nil {
-			return nil, &resp.SimpleErrorData{
-				Type: resp.SimpleErrorTypeGeneric,
-				Msg:  "value is out of range, must be positive",
+			endUint, err := strconv.ParseUint(args[2].Data, 10, 64)
+			if err != nil {
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeGeneric,
+					Msg:  "value is out of range, must be positive",
+				}
+			}
+			end = EntryID{
+				timestampMS: int64(endUint),
+				sequenceNum: math.MaxInt64,
 			}
 		}
-		start = int64(startUint)
-		end = int64(endUint)
 	}
 	return c.handleXRANGE(key, start, end)
 }

@@ -341,7 +341,7 @@ func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, *resp.Simpl
 	return resp.SimpleStringData{Data: string(value.Type)}, nil
 }
 
-func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkStringData, kvs []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleXADD(key resp.BulkStringData, entryID EntryID, kvs []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
 	value, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeStream,
 		Data: NewStreamValue(),
@@ -354,24 +354,20 @@ func (c *Controller) handleXADD(key resp.BulkStringData, entryID resp.BulkString
 	}
 	stream := value.Data.(*SetValueStream)
 
-	timestampMS, sequenceNum, err := parseStreamEntryID(entryID)
-	if err != nil {
-		return resp.BulkStringData{}, err
-	}
-	timestampMS, sequenceNum, err = fullfillStreamEntryID(stream, timestampMS, sequenceNum)
+	var err *resp.SimpleErrorData
+	entryID, err = fullfillStreamEntryID(stream, entryID)
 	if err != nil {
 		return nil, err
 	}
 	entry := StreamEntry{
-		timestampMs: timestampMS,
-		sequenceNum: sequenceNum,
-		KVs:         kvs,
+		ID:  entryID,
+		KVs: kvs,
 	}
 	stream.Append(entry)
-	return entry.ID(), nil
+	return entryID.Data(), nil
 }
 
-func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end int64) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (resp.Data, *resp.SimpleErrorData) {
 	value, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeStream,
 		Data: NewStreamValue(),
@@ -386,21 +382,23 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end int64) (re
 	if stream.Len() == 0 {
 		return resp.ArraysData{}, nil
 	}
-	if start == -1 {
-		start = 0
+	if start.IsZero() {
+		start = EntryID{
+			timestampMS: 0,
+			sequenceNum: 0,
+		}
 	}
-	if end == -1 {
+	if end.IsZero() {
 		lastElement := stream.At(stream.Len() - 1)
-		end = lastElement.timestampMs
+		end = lastElement.ID
 	}
 	entries := []StreamEntry{}
 	stream.ForEach(func(se *StreamEntry) bool {
-		fmt.Println(start, end, se.timestampMs)
-		if start <= se.timestampMs && se.timestampMs <= end {
+		if start.Cmp(se.ID) <= 0 && end.Cmp(se.ID) >= 0 {
 			entries = append(entries, *se)
 			return false
 		}
-		if se.timestampMs > end {
+		if end.Cmp(se.ID) < 0 {
 			return true
 		}
 		return false
@@ -408,7 +406,7 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end int64) (re
 	datas := make([]resp.Data, len(entries))
 	for idx, entry := range entries {
 		data := make([]resp.Data, len(entry.KVs)+1)
-		data[0] = entry.ID()
+		data[0] = entry.ID.Data()
 		for idx, ele := range entry.KVs {
 			// shift 1 idx, as idx 0 is entry ID.
 			data[idx+1] = ele
