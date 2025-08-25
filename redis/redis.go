@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -76,6 +77,9 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 
 	case "XRANGE":
 		handler = c.HandleXRANGE
+
+	case "XREAD":
+		handler = c.HandleXREAD
 
 	default:
 		return resp.SimpleErrorData{
@@ -312,8 +316,41 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 			}
 		}
 	}
+	utils.Assert(start.timestampMS != nil && start.sequenceNum != nil)
+	utils.Assert(end.timestampMS != nil && end.sequenceNum != nil)
 	return c.handleXRANGE(key,
 		EntryID{timestampMS: *start.timestampMS, sequenceNum: *start.sequenceNum},
 		EntryID{timestampMS: *end.timestampMS, sequenceNum: *end.sequenceNum},
 	)
+}
+
+// HandleXREAD handles XREAD
+// example: redis-cli XREAD streams some_key 1526985054069-0
+func (c *Controller) HandleXREAD(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+	if len(args) < 2 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'xread' command",
+		}
+	}
+	entryID := args[len(args)-1]
+	from, err := parseStreamEntryID(entryID)
+	if err != nil {
+		startUint, err := strconv.ParseUint(args[1].Data, 10, 64)
+		if err != nil {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "value is out of range, must be positive",
+			}
+		}
+		from = InputEntryID{
+			timestampMS: ptr(int64(startUint)),
+			sequenceNum: ptr[int64](0),
+		}
+	}
+	utils.Assert(from.timestampMS != nil && from.sequenceNum != nil)
+	return c.handleXREAD(args[:len(args)-1], EntryID{
+		timestampMS: *from.timestampMS,
+		sequenceNum: *from.sequenceNum,
+	})
 }

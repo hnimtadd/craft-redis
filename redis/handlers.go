@@ -391,14 +391,11 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 		}
 	}
 	stream := value.Data.(*SetValueStream)
-	c.logger.Debug(stream.Len())
 	if stream.Len() == 0 {
 		return resp.ArraysData{}, nil
 	}
-	c.logger.Debug("here")
 	entries := []StreamEntry{}
 	stream.ForEach(func(se *StreamEntry) bool {
-		c.logger.Debug("at", se.ID)
 		if start.Cmp(se.ID) <= 0 && end.Cmp(se.ID) >= 0 {
 			entries = append(entries, *se)
 			return false
@@ -409,7 +406,6 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 		return false
 	})
 	datas := make([]resp.Data, len(entries))
-	c.logger.Debug("got", entries)
 	for idx, entry := range entries {
 		kvsData := make([]resp.Data, len(entry.KVs))
 		for idx, ele := range entry.KVs {
@@ -427,4 +423,51 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 	return resp.ArraysData{
 		Datas: datas,
 	}, nil
+}
+
+func (c *Controller) handleXREAD(keys []resp.BulkStringData, from EntryID) (resp.Data, *resp.SimpleErrorData) {
+	c.logger.Debug(len(keys), from)
+	var results resp.ArraysData
+	for _, key := range keys {
+		value, found := c.data.Get(resp.Raw(key))
+		if !found {
+			continue
+		}
+		if value.Type != SetValueTypeStream {
+			continue
+		}
+		c.logger.Debug("type")
+		stream := value.Data.(*SetValueStream)
+		if stream.Len() == 0 {
+			continue
+		}
+		entries := []StreamEntry{}
+		stream.ForEach(func(se *StreamEntry) bool {
+			if from.Cmp(se.ID) < 0 {
+				entries = append(entries, *se)
+				return false
+			}
+			return false
+		})
+		c.logger.Debug("got", len(entries))
+		datas := make([]resp.Data, len(entries))
+		for idx, entry := range entries {
+			kvsData := make([]resp.Data, len(entry.KVs))
+			for idx, ele := range entry.KVs {
+				kvsData[idx] = ele
+			}
+			datas[idx] = resp.ArraysData{
+				Datas: []resp.Data{
+					entry.ID.Data(),
+					resp.ArraysData{
+						Datas: kvsData,
+					},
+				},
+			}
+		}
+		results.Datas = append(results.Datas, resp.ArraysData{
+			Datas: []resp.Data{key, resp.ArraysData{Datas: datas}},
+		})
+	}
+	return results, nil
 }
