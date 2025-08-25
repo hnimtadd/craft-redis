@@ -43,6 +43,11 @@ type StreamEntry struct {
 	KVs []resp.BulkStringData
 }
 
+type InputEntryID struct {
+	timestampMS *int64
+	sequenceNum *int64
+}
+
 type EntryID struct {
 	timestampMS int64
 	sequenceNum int64
@@ -68,6 +73,6 @@ func (e EntryID) Cmp(o EntryID) int {
 	return 0
 }
 
-func (e EntryID) IsZero() bool {
-	return e.timestampMS == -1 && e.sequenceNum == -1
+func (e InputEntryID) IsZero() bool {
+	return e.timestampMS == nil && e.sequenceNum == nil
 }

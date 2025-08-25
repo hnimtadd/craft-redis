@@ -27,13 +27,10 @@ func (s *Set[T]) Set(key string, data *T) (*T, bool) {
 	return data, true
 }
 
-// Get returns the value at the key key, if the key is not exists,
-// then s will generate a new element at key and return
-// the second return value indicate if new value is created or not.
 func (s *Set[T]) Get(key string) (*T, bool) {
 	data, found := s.data.Load(key)
 	if !found {
-		return nil, found
+		return nil, false
 	}
 
 	return data.(*T), true

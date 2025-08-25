@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/utils"
 )
 
 func (c *Controller) handleSet(key resp.BulkStringData, value resp.BulkStringData, opts ...resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
@@ -341,7 +342,8 @@ func (c *Controller) handleTYPE(key resp.BulkStringData) (resp.Data, *resp.Simpl
 	return resp.SimpleStringData{Data: string(value.Type)}, nil
 }
 
-func (c *Controller) handleXADD(key resp.BulkStringData, entryID EntryID, kvs []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleXADD(key resp.BulkStringData, entryID InputEntryID, kvs []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+	c.logger.Debug(resp.Raw(key))
 	value, _ := c.data.Getsert(resp.Raw(key), &Value{
 		Type: SetValueTypeStream,
 		Data: NewStreamValue(),
@@ -353,25 +355,35 @@ func (c *Controller) handleXADD(key resp.BulkStringData, entryID EntryID, kvs []
 		}
 	}
 	stream := value.Data.(*SetValueStream)
-
-	var err *resp.SimpleErrorData
-	entryID, err = fullfillStreamEntryID(stream, entryID)
+	utils.Assert(stream != nil, "stream must not be nil here")
+	validEntryID, err := fullfillStreamEntryID(stream, entryID)
 	if err != nil {
 		return nil, err
 	}
+
 	entry := StreamEntry{
-		ID:  entryID,
+		ID:  validEntryID,
 		KVs: kvs,
 	}
+	lastElement := stream.Last()
+	if lastElement != nil {
+		if validEntryID.Cmp(lastElement.ID) <= 0 {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "The ID specified in XADD is equal or smaller than the target stream top item",
+			}
+		}
+	}
 	stream.Append(entry)
-	return entryID.Data(), nil
+	return validEntryID.Data(), nil
 }
 
 func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (resp.Data, *resp.SimpleErrorData) {
-	value, _ := c.data.Getsert(resp.Raw(key), &Value{
-		Type: SetValueTypeStream,
-		Data: NewStreamValue(),
-	})
+	c.logger.Debug(resp.Raw(key), start, end)
+	value, found := c.data.Get(resp.Raw(key))
+	if !found {
+		return resp.ArraysData{}, nil
+	}
 	if value.Type != SetValueTypeStream {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeWrongType,
@@ -379,21 +391,14 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 		}
 	}
 	stream := value.Data.(*SetValueStream)
+	c.logger.Debug(stream.Len())
 	if stream.Len() == 0 {
 		return resp.ArraysData{}, nil
 	}
-	if start.IsZero() {
-		start = EntryID{
-			timestampMS: 0,
-			sequenceNum: 0,
-		}
-	}
-	if end.IsZero() {
-		lastElement := stream.At(stream.Len() - 1)
-		end = lastElement.ID
-	}
+	c.logger.Debug("here")
 	entries := []StreamEntry{}
 	stream.ForEach(func(se *StreamEntry) bool {
+		c.logger.Debug("at", se.ID)
 		if start.Cmp(se.ID) <= 0 && end.Cmp(se.ID) >= 0 {
 			entries = append(entries, *se)
 			return false
@@ -404,6 +409,7 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 		return false
 	})
 	datas := make([]resp.Data, len(entries))
+	c.logger.Debug("got", entries)
 	for idx, entry := range entries {
 		kvsData := make([]resp.Data, len(entry.KVs))
 		for idx, ele := range entry.KVs {

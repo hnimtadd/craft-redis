@@ -65,6 +65,22 @@ func (l *BLList[T]) Prepend(value T) int {
 	return l.data.Len()
 }
 
+func (l *BLList[T]) First() *T {
+	node := l.data.Front()
+	if node == nil {
+		return nil
+	}
+	return node.Value.(*T)
+}
+
+func (l *BLList[T]) Last() *T {
+	node := l.data.Back()
+	if node == nil {
+		return nil
+	}
+	return node.Value.(*T)
+}
+
 func (l *BLList[T]) At(idx int) *T {
 	if idx < 0 {
 		return nil

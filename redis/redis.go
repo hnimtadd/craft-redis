@@ -3,19 +3,31 @@ package redis
 import (
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/utils"
+	"github.com/sirupsen/logrus"
 )
 
 type Controller struct {
-	data *Set[Value]
+	data   *Set[Value]
+	logger *logrus.Logger
 }
 
 func NewController() *Controller {
+
+	var log = &logrus.Logger{
+		Out:       os.Stderr,
+		Formatter: new(logrus.TextFormatter),
+		Hooks:     make(logrus.LevelHooks),
+		Level:     logrus.DebugLevel,
+	}
 	return &Controller{
-		data: NewBLSet[Value](),
+		data:   NewBLSet[Value](),
+		logger: log,
 	}
 }
 
@@ -182,7 +194,7 @@ func (c *Controller) HandleLPOP(args []resp.BulkStringData) (resp.Data, *resp.Si
 	if len(args) == 2 {
 		argString := args[1].Data
 		parsed, err := strconv.ParseUint(argString, 10, 64)
-		if err != nil || parsed < 0 {
+		if err != nil {
 			return nil, &resp.SimpleErrorData{
 				Type: resp.SimpleErrorTypeGeneric,
 				Msg:  "value is out of range, must be positive",
@@ -268,8 +280,9 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 		}
 	}
 	key := args[0]
-	var start, end EntryID
+	var start, end InputEntryID
 	var err *resp.SimpleErrorData
+
 	if len(args) == 3 {
 		start, err = parseStreamEntryID(args[1])
 		if err != nil {
@@ -280,10 +293,11 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 					Msg:  "value is out of range, must be positive",
 				}
 			}
-			start = EntryID{
-				timestampMS: int64(startUint),
-				sequenceNum: 0,
+			start = InputEntryID{
+				timestampMS: ptr(int64(startUint)),
+				sequenceNum: ptr[int64](0),
 			}
+			utils.Assert(start.sequenceNum != nil && start.timestampMS != nil)
 		}
 
 		end, err = parseStreamEntryID(args[2])
@@ -295,11 +309,15 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 					Msg:  "value is out of range, must be positive",
 				}
 			}
-			end = EntryID{
-				timestampMS: int64(endUint),
-				sequenceNum: math.MaxInt64,
+			end = InputEntryID{
+				timestampMS: ptr(int64(endUint)),
+				sequenceNum: ptr[int64](math.MaxInt64),
 			}
+			utils.Assert(end.sequenceNum != nil && end.timestampMS != nil)
 		}
 	}
-	return c.handleXRANGE(key, start, end)
+	return c.handleXRANGE(key,
+		EntryID{timestampMS: *start.timestampMS, sequenceNum: *start.sequenceNum},
+		EntryID{timestampMS: *end.timestampMS, sequenceNum: *end.sequenceNum},
+	)
 }
