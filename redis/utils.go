@@ -60,10 +60,10 @@ func parseStreamEntryID(entryID resp.BulkStringData) (InputEntryID, *resp.Simple
 		}
 	}
 	timestampMSString := parts[0]
-	var timestampMS int64
+	var timestampMS *int64
 	switch timestampMSString {
 	case "*":
-		timestampMS = -1
+		timestampMS = nil
 	default:
 		timestampMSUint, err := strconv.ParseUint(timestampMSString, 10, 64)
 		if err != nil {
@@ -72,13 +72,13 @@ func parseStreamEntryID(entryID resp.BulkStringData) (InputEntryID, *resp.Simple
 				Msg:  "Invalid stream ID specified as stream command argument",
 			}
 		}
-		timestampMS = int64(timestampMSUint)
+		timestampMS = ptr[int64](int64(timestampMSUint))
 	}
 	sequenceNumString := parts[1]
-	var sequenceNum int64
+	var sequenceNum *int64
 	switch sequenceNumString {
 	case "*":
-		sequenceNum = -1
+		sequenceNum = nil
 	default:
 		sequenceNumUint, err := strconv.ParseUint(sequenceNumString, 10, 64)
 		if err != nil {
@@ -87,9 +87,9 @@ func parseStreamEntryID(entryID resp.BulkStringData) (InputEntryID, *resp.Simple
 				Msg:  "Invalid stream ID specified as stream command argument",
 			}
 		}
-		sequenceNum = int64(sequenceNumUint)
+		sequenceNum = ptr(int64(sequenceNumUint))
 	}
-	return InputEntryID{timestampMS: &timestampMS, sequenceNum: &sequenceNum}, nil
+	return InputEntryID{timestampMS: timestampMS, sequenceNum: sequenceNum}, nil
 }
 
 func fullfillStreamEntryID(stream *SetValueStream, id InputEntryID) (EntryID, *resp.SimpleErrorData) {

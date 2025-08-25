@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/redis/resp"
-	"github.com/codecrafters-io/redis-starter-go/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -18,8 +17,7 @@ type Controller struct {
 }
 
 func NewController() *Controller {
-
-	var log = &logrus.Logger{
+	log := &logrus.Logger{
 		Out:       os.Stderr,
 		Formatter: new(logrus.TextFormatter),
 		Hooks:     make(logrus.LevelHooks),
@@ -297,7 +295,6 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 				timestampMS: ptr(int64(startUint)),
 				sequenceNum: ptr[int64](0),
 			}
-			utils.Assert(start.sequenceNum != nil && start.timestampMS != nil)
 		}
 
 		end, err = parseStreamEntryID(args[2])
@@ -313,7 +310,6 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 				timestampMS: ptr(int64(endUint)),
 				sequenceNum: ptr[int64](math.MaxInt64),
 			}
-			utils.Assert(end.sequenceNum != nil && end.timestampMS != nil)
 		}
 	}
 	return c.handleXRANGE(key,
