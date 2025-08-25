@@ -425,10 +425,11 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 	}, nil
 }
 
-func (c *Controller) handleXREAD(keys []resp.BulkStringData, from EntryID) (resp.Data, *resp.SimpleErrorData) {
-	c.logger.Debug(len(keys), from)
+func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID) (resp.Data, *resp.SimpleErrorData) {
+	c.logger.Debug(len(keys), len(entriesID))
+	utils.Assert(len(keys) == len(entriesID))
 	var results resp.ArraysData
-	for _, key := range keys {
+	for idx, key := range keys {
 		value, found := c.data.Get(resp.Raw(key))
 		if !found {
 			continue
@@ -436,14 +437,13 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, from EntryID) (resp
 		if value.Type != SetValueTypeStream {
 			continue
 		}
-		c.logger.Debug("type")
 		stream := value.Data.(*SetValueStream)
 		if stream.Len() == 0 {
 			continue
 		}
 		entries := []StreamEntry{}
 		stream.ForEach(func(se *StreamEntry) bool {
-			if from.Cmp(se.ID) < 0 {
+			if entriesID[idx].Cmp(se.ID) < 0 {
 				entries = append(entries, *se)
 				return false
 			}

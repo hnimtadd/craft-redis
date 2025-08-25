@@ -327,30 +327,37 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 // HandleXREAD handles XREAD
 // example: redis-cli XREAD streams some_key 1526985054069-0
 func (c *Controller) HandleXREAD(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) < 2 {
+	// we omit 1 entry for 'STREAMS'
+	if len(args) < 3 || (len(args)-1)%2 != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'xread' command",
 		}
 	}
-	entryID := args[len(args)-1]
-	from, err := parseStreamEntryID(entryID)
-	if err != nil {
-		startUint, err := strconv.ParseUint(args[1].Data, 10, 64)
+	args = args[1:]
+	entryIDsData := args[len(args)/2:]
+	keys := args[0 : len(args)/2]
+	entryIDs := make([]EntryID, len(entryIDsData))
+	for idx, entryID := range entryIDsData {
+		from, err := parseStreamEntryID(entryID)
 		if err != nil {
-			return nil, &resp.SimpleErrorData{
-				Type: resp.SimpleErrorTypeGeneric,
-				Msg:  "value is out of range, must be positive",
+			startUint, err := strconv.ParseUint(args[1].Data, 10, 64)
+			if err != nil {
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeGeneric,
+					Msg:  "value is out of range, must be positive",
+				}
+			}
+			from = InputEntryID{
+				timestampMS: ptr(int64(startUint)),
+				sequenceNum: ptr[int64](0),
 			}
 		}
-		from = InputEntryID{
-			timestampMS: ptr(int64(startUint)),
-			sequenceNum: ptr[int64](0),
+		utils.Assert(from.timestampMS != nil && from.sequenceNum != nil)
+		entryIDs[idx] = EntryID{
+			timestampMS: *from.timestampMS,
+			sequenceNum: *from.sequenceNum,
 		}
 	}
-	utils.Assert(from.timestampMS != nil && from.sequenceNum != nil)
-	return c.handleXREAD(args[:len(args)-1], EntryID{
-		timestampMS: *from.timestampMS,
-		sequenceNum: *from.sequenceNum,
-	})
+	return c.handleXREAD(keys, entryIDs)
 }
