@@ -45,11 +45,11 @@ func parseStreamEntryID(entryID resp.BulkStringData) (InputEntryID, *resp.Simple
 	// to genrate both timeID part and sequence part
 	switch entryID.Data {
 	case "*":
-		return InputEntryID{timestampMS: nil, sequenceNum: nil}, nil
+		return InputEntryID{timestampMS: nil, sequenceNum: nil, value: entryID.Data}, nil
 	case "-":
-		return InputEntryID{timestampMS: ptr[int64](0), sequenceNum: ptr[int64](0)}, nil
+		return InputEntryID{timestampMS: ptr[int64](0), sequenceNum: ptr[int64](0), value: entryID.Data}, nil
 	case "+":
-		return InputEntryID{timestampMS: ptr[int64](math.MaxInt64), sequenceNum: ptr[int64](math.MaxInt64)}, nil
+		return InputEntryID{timestampMS: ptr[int64](math.MaxInt64), sequenceNum: ptr[int64](math.MaxInt64), value: entryID.Data}, nil
 	}
 
 	parts := strings.Split(entryID.Data, "-")
@@ -89,7 +89,7 @@ func parseStreamEntryID(entryID resp.BulkStringData) (InputEntryID, *resp.Simple
 		}
 		sequenceNum = ptr(int64(sequenceNumUint))
 	}
-	return InputEntryID{timestampMS: timestampMS, sequenceNum: sequenceNum}, nil
+	return InputEntryID{timestampMS: timestampMS, sequenceNum: sequenceNum, value: entryID.Data}, nil
 }
 
 func fullfillStreamEntryID(stream *SetValueStream, id InputEntryID) (EntryID, *resp.SimpleErrorData) {

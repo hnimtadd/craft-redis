@@ -46,11 +46,13 @@ type StreamEntry struct {
 type InputEntryID struct {
 	timestampMS *int64
 	sequenceNum *int64
+	value       string
 }
 
 type EntryID struct {
 	timestampMS int64
 	sequenceNum int64
+	value       string
 }
 
 func (e EntryID) Data() resp.BulkStringData {

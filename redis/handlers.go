@@ -472,6 +472,16 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 			waitCh := make(chan struct{})
 			sub := stream.SharedSubscription()
 			go func() {
+				// specical hack, we should consider handle this case
+				// ot of this scope.
+				if entryID.value == "$" {
+					if last := stream.Last(); last != nil {
+						entryID = last.ID
+					} else {
+						entryID = EntryID{timestampMS: 0, sequenceNum: 0}
+					}
+				}
+
 				for {
 					if stream.Len() > 0 {
 						last := stream.Last()

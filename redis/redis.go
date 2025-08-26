@@ -366,24 +366,33 @@ loop:
 	keys := args[0 : len(args)/2]
 	entryIDs := make([]EntryID, len(entryIDsData))
 	for idx, entryID := range entryIDsData {
-		from, err := parseStreamEntryID(entryID)
-		if err != nil {
-			startUint, err := strconv.ParseUint(args[1].Data, 10, 64)
+		switch entryID.Data {
+		case "$":
+			entryIDs[idx] = EntryID{
+				value: entryID.Data,
+			}
+		default:
+			from, err := parseStreamEntryID(entryID)
 			if err != nil {
-				return nil, &resp.SimpleErrorData{
-					Type: resp.SimpleErrorTypeGeneric,
-					Msg:  "value is out of range, must be positive",
+				startUint, err := strconv.ParseUint(entryID.Data, 10, 64)
+				if err != nil {
+					return nil, &resp.SimpleErrorData{
+						Type: resp.SimpleErrorTypeGeneric,
+						Msg:  "value is out of range, must be positive",
+					}
+				}
+				from = InputEntryID{
+					timestampMS: ptr(int64(startUint)),
+					sequenceNum: ptr[int64](0),
+					value:       entryID.Data,
 				}
 			}
-			from = InputEntryID{
-				timestampMS: ptr(int64(startUint)),
-				sequenceNum: ptr[int64](0),
+			utils.Assert(from.timestampMS != nil && from.sequenceNum != nil)
+			entryIDs[idx] = EntryID{
+				timestampMS: *from.timestampMS,
+				sequenceNum: *from.sequenceNum,
+				value:       from.value,
 			}
-		}
-		utils.Assert(from.timestampMS != nil && from.sequenceNum != nil)
-		entryIDs[idx] = EntryID{
-			timestampMS: *from.timestampMS,
-			sequenceNum: *from.sequenceNum,
 		}
 	}
 	return c.handleXREAD(keys, entryIDs, timeoutInMs)
