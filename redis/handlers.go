@@ -509,7 +509,7 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 		}(idx, keyData, entriesID[idx])
 	}
 
-	if timeoutInMs != nil {
+	if timeoutInMs != nil && *timeoutInMs != 0 {
 		go func() {
 			<-time.After(time.Duration(*timeoutInMs) * time.Millisecond)
 			close(cancelCh)
