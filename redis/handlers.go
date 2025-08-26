@@ -450,9 +450,10 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 	doneCh := make(chan struct {
 		key     resp.BulkStringData
 		entryID EntryID
+		idx     int
 	}, len(keys))
 	for idx, keyData := range keys {
-		go func(key resp.BulkStringData, entryID EntryID) {
+		go func(idx int, key resp.BulkStringData, entryID EntryID) {
 			value, _ := c.data.Getsert(resp.Raw(key), &Value{
 				Type: SetValueTypeList,
 				Data: NewStreamValue(),
@@ -492,9 +493,11 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 				case doneCh <- struct {
 					key     resp.BulkStringData
 					entryID EntryID
+					idx     int
 				}{
 					key:     key,
 					entryID: entryID,
+					idx:     idx,
 				}:
 					fmt.Printf("Routine for %s sent signal.\n", resp.Raw(key))
 				case <-cancelCh:
@@ -503,7 +506,7 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 			case <-cancelCh:
 				fmt.Printf("Routine for %s was canceled while waiting.\n", resp.Raw(key))
 			}
-		}(keyData, entriesID[idx])
+		}(idx, keyData, entriesID[idx])
 	}
 
 	if timeoutInMs != nil {
@@ -513,7 +516,9 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 		}()
 	}
 
-	var results resp.ArraysData
+	results := resp.ArraysData{
+		Datas: make([]resp.Data, len(keys)),
+	}
 	for range len(keys) {
 		select {
 		case <-cancelCh:
@@ -556,11 +561,9 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 					},
 				}
 			}
-			results.Datas = append(
-				results.Datas,
-				resp.ArraysData{
-					Datas: []resp.Data{key, resp.ArraysData{Datas: datas}},
-				})
+			results.Datas[record.idx] = resp.ArraysData{
+				Datas: []resp.Data{key, resp.ArraysData{Datas: datas}},
+			}
 		}
 	}
 	return results, nil
