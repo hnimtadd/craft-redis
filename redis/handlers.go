@@ -80,7 +80,12 @@ func (c *Controller) handleRPUSH(key resp.BulkStringData, values ...resp.BulkStr
 		}
 	}
 	lst := valueData.Data.(*SetValueList)
-	defer lst.Signal()
+	defer func() {
+		sub := lst.FirstAvailableSubscriber()
+		if sub != nil {
+			sub.Signal()
+		}
+	}()
 	len := lst.Append(values...)
 
 	return resp.Integer{Data: len}, nil
@@ -98,7 +103,12 @@ func (c *Controller) handleLPUSH(key resp.BulkStringData, values ...resp.BulkStr
 		}
 	}
 	lst := value.Data.(*SetValueList)
-	defer lst.Signal()
+	defer func() {
+		sub := lst.FirstAvailableSubscriber()
+		if sub != nil {
+			sub.Signal()
+		}
+	}()
 
 	// reverse so we have a list that should be exists after we add to the list
 	// then we just simply append the original list.
@@ -264,13 +274,15 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 				case doneCh <- key:
 					fmt.Printf("Routine for %s sent signal.\n", resp.Raw(key))
 				case <-cancelCh:
-					sub.cond.Signal()
+					sub.Signal()
 					// If a cancel signal arrived while we were trying to send,
 					// it means another routine won the race.
 					fmt.Printf("Routine for %s found another signal was already sent and was canceled.\n", resp.Raw(key))
 				}
 			case <-cancelCh:
-				sub.cond.Signal()
+				// At this point, the goroutine from `cond.Wait()` is still blocked.
+				// We need to to signal, in order to waky it up
+				sub.Signal()
 				fmt.Printf("Routine for %s was canceled while waiting.\n", resp.Raw(key))
 				// At this point, the goroutine from `cond.Wait()` is still blocked.
 				// There is no clean way to unblock a `cond.Wait()` from outside.
@@ -356,6 +368,12 @@ func (c *Controller) handleXADD(key resp.BulkStringData, entryID InputEntryID, k
 	}
 	stream := value.Data.(*SetValueStream)
 	utils.Assert(stream != nil, "stream must not be nil here")
+	defer func() {
+		sub := stream.SharedSubscription()
+		if sub != nil {
+			sub.Broadcast()
+		}
+	}()
 	validEntryID, err := fullfillStreamEntryID(stream, entryID)
 	if err != nil {
 		return nil, err
@@ -425,49 +443,125 @@ func (c *Controller) handleXRANGE(key resp.BulkStringData, start, end EntryID) (
 	}, nil
 }
 
-func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID, timeoutInMs *int64) (resp.Data, *resp.SimpleErrorData) {
 	c.logger.Debug(len(keys), len(entriesID))
 	utils.Assert(len(keys) == len(entriesID))
+	cancelCh := make(chan any)
+	doneCh := make(chan struct {
+		key     resp.BulkStringData
+		entryID EntryID
+	}, len(keys))
+	for idx, keyData := range keys {
+		go func(key resp.BulkStringData, entryID EntryID) {
+			value, _ := c.data.Getsert(resp.Raw(key), &Value{
+				Type: SetValueTypeList,
+				Data: NewStreamValue(),
+			})
+			if value.Type != SetValueTypeStream {
+				return
+			}
+			stream := value.Data.(*SetValueStream)
+			select {
+			case <-cancelCh:
+				fmt.Printf("Routine for %s was canceled before it was signaled.\n", resp.Raw(key))
+				return // Exit gracefully.
+			default:
+				// Not canceled yet, proceed to wait.
+			}
+			waitCh := make(chan struct{})
+			sub := stream.SharedSubscription()
+			go func() {
+				for {
+					if stream.Len() > 0 {
+						last := stream.Last()
+						// if a stream has last record with greater entryID, then
+						// at least we have 1 valid entry.
+						if last.ID.Cmp(entryID) > 0 {
+							close(waitCh)
+							return
+						}
+					}
+					sub.Wait()
+				}
+			}()
+			select {
+			case <-waitCh:
+				fmt.Printf("Routine for %s has been woken up.\n", resp.Raw(key))
+				// Try to send on the done channel.
+				select {
+				case doneCh <- struct {
+					key     resp.BulkStringData
+					entryID EntryID
+				}{
+					key:     key,
+					entryID: entryID,
+				}:
+					fmt.Printf("Routine for %s sent signal.\n", resp.Raw(key))
+				case <-cancelCh:
+					fmt.Printf("Routine for %s found another signal was already sent and was canceled.\n", resp.Raw(key))
+				}
+			case <-cancelCh:
+				fmt.Printf("Routine for %s was canceled while waiting.\n", resp.Raw(key))
+			}
+		}(keyData, entriesID[idx])
+	}
+
+	if timeoutInMs != nil {
+		go func() {
+			<-time.After(time.Duration(*timeoutInMs) * time.Millisecond)
+			close(cancelCh)
+		}()
+	}
+
 	var results resp.ArraysData
-	for idx, key := range keys {
-		value, found := c.data.Get(resp.Raw(key))
-		if !found {
-			continue
-		}
-		if value.Type != SetValueTypeStream {
-			continue
-		}
-		stream := value.Data.(*SetValueStream)
-		if stream.Len() == 0 {
-			continue
-		}
-		entries := []StreamEntry{}
-		stream.ForEach(func(se *StreamEntry) bool {
-			if entriesID[idx].Cmp(se.ID) < 0 {
-				entries = append(entries, *se)
+	for range len(keys) {
+		select {
+		case <-cancelCh:
+			return resp.ArraysData{}, nil
+		case record := <-doneCh:
+			key := record.key
+			entryID := record.entryID
+			value, found := c.data.Get(resp.Raw(key))
+			if !found {
+				continue
+			}
+			if value.Type != SetValueTypeStream {
+				continue
+			}
+			stream := value.Data.(*SetValueStream)
+			if stream.Len() == 0 {
+				continue
+			}
+			entries := []StreamEntry{}
+			stream.ForEach(func(se *StreamEntry) bool {
+				if entryID.Cmp(se.ID) < 0 {
+					entries = append(entries, *se)
+					return false
+				}
 				return false
-			}
-			return false
-		})
-		c.logger.Debug("got", len(entries))
-		datas := make([]resp.Data, len(entries))
-		for idx, entry := range entries {
-			kvsData := make([]resp.Data, len(entry.KVs))
-			for idx, ele := range entry.KVs {
-				kvsData[idx] = ele
-			}
-			datas[idx] = resp.ArraysData{
-				Datas: []resp.Data{
-					entry.ID.Data(),
-					resp.ArraysData{
-						Datas: kvsData,
+			})
+			c.logger.Debug("got", len(entries))
+			datas := make([]resp.Data, len(entries))
+			for idx, entry := range entries {
+				kvsData := make([]resp.Data, len(entry.KVs))
+				for idx, ele := range entry.KVs {
+					kvsData[idx] = ele
+				}
+				datas[idx] = resp.ArraysData{
+					Datas: []resp.Data{
+						entry.ID.Data(),
+						resp.ArraysData{
+							Datas: kvsData,
+						},
 					},
-				},
+				}
 			}
+			results.Datas = append(
+				results.Datas,
+				resp.ArraysData{
+					Datas: []resp.Data{key, resp.ArraysData{Datas: datas}},
+				})
 		}
-		results.Datas = append(results.Datas, resp.ArraysData{
-			Datas: []resp.Data{key, resp.ArraysData{Datas: datas}},
-		})
 	}
 	return results, nil
 }

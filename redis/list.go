@@ -13,18 +13,21 @@ type BLList[T any] struct {
 	data *list.List
 
 	subscribers []*Subscription
+	sharedSub   *Subscription
 	mu          sync.Mutex
 }
 type Subscription struct {
-	cond        *sync.Cond
+	*sync.Cond
 	deactivated bool
 }
 
 func NewBLList[T any]() *BLList[T] {
-	return &BLList[T]{
+	lst := &BLList[T]{
 		data:        list.New(),
 		subscribers: []*Subscription{},
 	}
+	lst.sharedSub = lst.NewSubscription()
+	return lst
 }
 
 func (l *BLList[T]) get(idx uint) *list.Element {
@@ -132,7 +135,7 @@ func (l *BLList[T]) Len() int {
 	return l.data.Len()
 }
 
-func (l *BLList[T]) Signal() {
+func (l *BLList[T]) FirstAvailableSubscriber() *Subscription {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for len(l.subscribers) > 0 {
@@ -141,24 +144,26 @@ func (l *BLList[T]) Signal() {
 			l.subscribers = l.subscribers[1:]
 			continue
 		}
-		fmt.Println("signalling", l.subscribers)
-		sub.cond.Signal()
-		l.subscribers = l.subscribers[1:]
-		return
+		return sub
 	}
+	return nil
 }
 
 func (l *BLList[T]) NewSubscription() *Subscription {
 	sub := &Subscription{
-		cond: sync.NewCond(&sync.Mutex{}),
+		Cond:        sync.NewCond(&sync.Mutex{}),
+		deactivated: false,
 	}
 	return sub
+}
+
+func (l *BLList[T]) SharedSubscription() *Subscription {
+	return l.sharedSub
 }
 
 func (l *BLList[T]) Subscribe(sub *Subscription) *Subscription {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	fmt.Println("handling subscription")
 	l.subscribers = append(l.subscribers, sub)
 	return sub
 }
@@ -172,11 +177,13 @@ func (l *BLList[T]) ForEach(fn func(*T) bool) {
 }
 
 func (s *Subscription) Deactivate() {
+	// when we do deactivated, we don't actually remove this subscriptions
+	// out from list, the list will lazily remove it later.
 	s.deactivated = true
 }
 
 func (s *Subscription) Wait() {
-	s.cond.L.Lock()
-	s.cond.Wait()
-	s.cond.L.Unlock()
+	s.Cond.L.Lock()
+	s.Cond.Wait()
+	s.Cond.L.Unlock()
 }

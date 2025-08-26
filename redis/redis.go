@@ -327,14 +327,41 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 // HandleXREAD handles XREAD
 // example: redis-cli XREAD streams some_key 1526985054069-0
 func (c *Controller) HandleXREAD(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+	// we loop untils we got the "STREAMS"
+	var timeoutInMs *int64
+loop:
+	for idx := 0; idx < len(args); idx++ {
+		arg := args[idx]
+		switch strings.ToUpper(arg.Data) {
+		case "STREAMS":
+			args = args[idx+1:]
+			break loop
+		case "BLOCK":
+			if idx+1 >= len(args) {
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeGeneric,
+					Msg:  "wrong number of arguments for 'xread' command",
+				}
+			}
+			blockTimeInMsString := args[idx+1].Data
+
+			blockTimeUint, err := strconv.ParseUint(blockTimeInMsString, 10, 64)
+			if err != nil {
+				return nil, &resp.SimpleErrorData{
+					Type: resp.SimpleErrorTypeGeneric,
+					Msg:  "value is out of range, must be positive",
+				}
+			}
+			timeoutInMs = ptr(int64(blockTimeUint))
+		}
+	}
 	// we omit 1 entry for 'STREAMS'
-	if len(args) < 3 || (len(args)-1)%2 != 0 {
+	if len(args) < 2 || len(args)%2 != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'xread' command",
 		}
 	}
-	args = args[1:]
 	entryIDsData := args[len(args)/2:]
 	keys := args[0 : len(args)/2]
 	entryIDs := make([]EntryID, len(entryIDsData))
@@ -359,5 +386,5 @@ func (c *Controller) HandleXREAD(args []resp.BulkStringData) (resp.Data, *resp.S
 			sequenceNum: *from.sequenceNum,
 		}
 	}
-	return c.handleXREAD(keys, entryIDs)
+	return c.handleXREAD(keys, entryIDs, timeoutInMs)
 }
