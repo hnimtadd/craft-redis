@@ -149,7 +149,7 @@ func (c *Controller) MULTIMiddleware(next HandlerFunc) HandlerFunc {
 			args:        args,
 			sessionInfo: session,
 		})
-		return resp.BulkStringData{Data: "queue"}, nil
+		return resp.SimpleStringData{Data: "QUEUE"}, nil
 	}
 }
 
