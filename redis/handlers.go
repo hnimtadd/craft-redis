@@ -615,7 +615,13 @@ func (c *Controller) handleMULTI(session Session) (resp.Data, *resp.SimpleErrorD
 			Msg:  "MULTI calls can not be nested",
 		}
 	}
-	_, added := c.queue.Set(session.Hash, &[]HandlerFunc{})
+	_, added := c.queue.Set(session.Hash, &Queue{
+		commands: []struct {
+			handler     HandlerFunc
+			args        []resp.BulkStringData
+			sessionInfo Session
+		}{},
+	})
 	if !added {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -623,4 +629,27 @@ func (c *Controller) handleMULTI(session Session) (resp.Data, *resp.SimpleErrorD
 		}
 	}
 	return resp.BulkStringData{Data: "OK"}, nil
+}
+
+func (c *Controller) handleEXEC(session Session) (resp.Data, *resp.SimpleErrorData) {
+	queue, found := c.queue.Get(session.Hash)
+	if !found {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "EXEC without MULTI",
+		}
+	}
+	result := resp.ArraysData{
+		Datas: make([]resp.Data, len(queue.commands)),
+	}
+	for idx, command := range queue.commands {
+		res, err := command.handler(command.args, command.sessionInfo)
+		if err != nil {
+			result.Datas[idx] = err
+		} else {
+			result.Datas[idx] = res
+		}
+	}
+	c.queue.Remove(session.Hash)
+	return result, nil
 }

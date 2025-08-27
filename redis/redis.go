@@ -18,7 +18,7 @@ type Controller struct {
 
 	sessions *Set[Session]
 
-	queue *Set[[]HandlerFunc]
+	queue *Set[Queue]
 }
 
 func NewController() *Controller {
@@ -32,11 +32,20 @@ func NewController() *Controller {
 		data:     NewBLSet[Value](),
 		logger:   log,
 		sessions: NewBLSet[Session](),
-		queue:    NewBLSet[[]HandlerFunc](),
+		queue:    NewBLSet[Queue](),
 	}
 }
 
-type HandlerFunc func([]resp.BulkStringData, Session) (resp.Data, *resp.SimpleErrorData)
+type (
+	HandlerFunc func([]resp.BulkStringData, Session) (resp.Data, *resp.SimpleErrorData)
+	Queue       struct {
+		commands []struct {
+			handler     HandlerFunc
+			args        []resp.BulkStringData
+			sessionInfo Session
+		}
+	}
+)
 
 func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data {
 	cmd, err := parse(data)
@@ -49,52 +58,69 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 
 	case "ECHO":
 		handler = c.HandleECHO
+		handler = c.MULTIMiddleware(handler)
 
 	case "PING":
 		handler = c.HandlePING
+		handler = c.MULTIMiddleware(handler)
 
 	case "SET":
 		handler = c.HandleSET
+		handler = c.MULTIMiddleware(handler)
 
 	case "GET":
 		handler = c.HandleGET
+		handler = c.MULTIMiddleware(handler)
 
 	case "RPUSH":
 		handler = c.HandleRPUSH
+		handler = c.MULTIMiddleware(handler)
 
 	case "LRANGE":
 		handler = c.HandleLRANGE
+		handler = c.MULTIMiddleware(handler)
 
 	case "LPUSH":
 		handler = c.HandleLPUSH
+		handler = c.MULTIMiddleware(handler)
 
 	case "LLEN":
 		handler = c.HandleLLEN
+		handler = c.MULTIMiddleware(handler)
 
 	case "LPOP":
 		handler = c.HandleLPOP
+		handler = c.MULTIMiddleware(handler)
 
 	case "BLPOP":
 		handler = c.HandleBLPOP
+		handler = c.MULTIMiddleware(handler)
 
 	case "TYPE":
 		handler = c.HandleTYPE
+		handler = c.MULTIMiddleware(handler)
 
 	case "XADD":
 		handler = c.HandleXADD
+		handler = c.MULTIMiddleware(handler)
 
 	case "XRANGE":
 		handler = c.HandleXRANGE
+		handler = c.MULTIMiddleware(handler)
 
 	case "XREAD":
 		handler = c.HandleXREAD
+		handler = c.MULTIMiddleware(handler)
 
 	case "INCR":
 		handler = c.HandleINCR
+		handler = c.MULTIMiddleware(handler)
 
 	case "MULTI":
 		handler = c.HandleMULTI
 
+	case "EXEC":
+		handler = c.HandleEXEC
 	default:
 		return resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -106,6 +132,25 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 		return err
 	}
 	return res
+}
+
+func (c *Controller) MULTIMiddleware(next HandlerFunc) HandlerFunc {
+	return func(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+		if !c.queue.Has(session.Hash) {
+			return next(args, session)
+		}
+		queue, _ := c.queue.Get(session.Hash)
+		queue.commands = append(queue.commands, struct {
+			handler     HandlerFunc
+			args        []resp.BulkStringData
+			sessionInfo Session
+		}{
+			handler:     next,
+			args:        args,
+			sessionInfo: session,
+		})
+		return resp.BulkStringData{Data: "queue"}, nil
+	}
 }
 
 func (c *Controller) HandleECHO(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
@@ -442,4 +487,14 @@ func (c *Controller) HandleMULTI(args []resp.BulkStringData, session Session) (r
 		}
 	}
 	return c.handleMULTI(session)
+}
+
+func (c *Controller) HandleEXEC(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(args) != 0 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'exec' command",
+		}
+	}
+	return c.handleEXEC(session)
 }
