@@ -578,3 +578,35 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 	}
 	return results, nil
 }
+
+func (c *Controller) handleINCR(key resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+	valueData, isUpsert := c.data.Getsert(resp.Raw(key), &Value{
+		Type: SetValueTypeString,
+		Data: &SetValueString{
+			Data: resp.BulkStringData{
+				Data: "1",
+			},
+		},
+	})
+	if isUpsert {
+		return resp.Integer{Data: 1}, nil
+	}
+	if valueData.Type != SetValueTypeString {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeWrongType,
+			Msg:  fmt.Sprintf("Operation against %s key holding the wrong kind of value", key.Data),
+		}
+	}
+	record := valueData.Data.(*SetValueString)
+	valueInt, err := strconv.ParseInt(record.Data.Data, 10, 64)
+	if err != nil {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "value is not an integer or out of range",
+		}
+	}
+	newValue := int(valueInt) + 1
+
+	record.Data.Data = fmt.Sprint(newValue)
+	return resp.Integer{Data: newValue}, nil
+}

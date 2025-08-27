@@ -81,6 +81,9 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	case "XREAD":
 		handler = c.HandleXREAD
 
+	case "INCR":
+		handler = c.HandleINCR
+
 	default:
 		return resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -369,6 +372,8 @@ loop:
 		switch entryID.Data {
 		case "$":
 			entryIDs[idx] = EntryID{
+				// we dont set the timestamp and sequenceNum as this
+				// one will be lazily load later inside the handler.
 				value: entryID.Data,
 			}
 		default:
@@ -396,4 +401,16 @@ loop:
 		}
 	}
 	return c.handleXREAD(keys, entryIDs, timeoutInMs)
+}
+
+// HandleINCR handles INCR
+// example: redis-cli INCR foo
+func (c *Controller) HandleINCR(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+	if len(args) != 1 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'incr' command",
+		}
+	}
+	return c.handleINCR(args[0])
 }
