@@ -121,6 +121,10 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 
 	case "EXEC":
 		handler = c.HandleEXEC
+
+	case "DISCARD":
+		handler = c.HandleDISCARD
+
 	default:
 		return resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -489,6 +493,17 @@ func (c *Controller) HandleMULTI(args []resp.BulkStringData, session Session) (r
 	return c.handleMULTI(session)
 }
 
+// HandleEXEC handles EXEC
+// example: $ redis-cli
+// > MULTI
+// OK
+// > SET foo 41
+// QUEUED
+// > INCR foo
+// QUEUED
+// > EXEC
+// 1. OK
+// 2. 42
 func (c *Controller) HandleEXEC(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 0 {
 		return nil, &resp.SimpleErrorData{
@@ -497,4 +512,25 @@ func (c *Controller) HandleEXEC(args []resp.BulkStringData, session Session) (re
 		}
 	}
 	return c.handleEXEC(session)
+}
+
+// HandleDISCARD handles DISCARD
+// example: $ redis-cli
+// > MULTI
+// OK
+// > SET foo 41
+// QUEUED
+// > INCR foo
+// QUEUED
+// > DISCARD
+// OK
+// . 42
+func (c *Controller) HandleDISCARD(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(args) != 0 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'exec' command",
+		}
+	}
+	return c.handleDISCARD(session)
 }

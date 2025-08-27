@@ -653,3 +653,15 @@ func (c *Controller) handleEXEC(session Session) (resp.Data, *resp.SimpleErrorDa
 	c.queue.Remove(session.Hash)
 	return result, nil
 }
+
+func (c *Controller) handleDISCARD(session Session) (resp.Data, *resp.SimpleErrorData) {
+	_, found := c.queue.Get(session.Hash)
+	if !found {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "DISCARD without MULTI",
+		}
+	}
+	c.queue.Remove(session.Hash)
+	return resp.SimpleStringData{Data: "OK"}, nil
+}
