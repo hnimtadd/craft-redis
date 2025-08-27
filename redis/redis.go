@@ -15,6 +15,10 @@ import (
 type Controller struct {
 	data   *Set[Value]
 	logger *logrus.Logger
+
+	sessions *Set[Session]
+
+	queue *Set[[]HandlerFunc]
 }
 
 func NewController() *Controller {
@@ -25,18 +29,22 @@ func NewController() *Controller {
 		Level:     logrus.DebugLevel,
 	}
 	return &Controller{
-		data:   NewBLSet[Value](),
-		logger: log,
+		data:     NewBLSet[Value](),
+		logger:   log,
+		sessions: NewBLSet[Session](),
+		queue:    NewBLSet[[]HandlerFunc](),
 	}
 }
 
-func (c *Controller) Handle(data resp.ArraysData) resp.Data {
+type HandlerFunc func([]resp.BulkStringData, Session) (resp.Data, *resp.SimpleErrorData)
+
+func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data {
 	cmd, err := parse(data)
 	if err != nil {
 		return err
 	}
 
-	var handler func([]resp.BulkStringData) (resp.Data, *resp.SimpleErrorData)
+	var handler HandlerFunc
 	switch strings.ToUpper(cmd.cmd.Data) {
 
 	case "ECHO":
@@ -84,20 +92,23 @@ func (c *Controller) Handle(data resp.ArraysData) resp.Data {
 	case "INCR":
 		handler = c.HandleINCR
 
+	case "MULTI":
+		handler = c.HandleMULTI
+
 	default:
 		return resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  fmt.Sprintf("unknown command '%s'", cmd.cmd.Data),
 		}
 	}
-	res, err := handler(cmd.args)
+	res, err := handler(cmd.args, sessionInfo)
 	if err != nil {
 		return err
 	}
 	return res
 }
 
-func (c *Controller) HandleECHO(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleECHO(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) == 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -107,11 +118,11 @@ func (c *Controller) HandleECHO(args []resp.BulkStringData) (resp.Data, *resp.Si
 	return args[0], nil
 }
 
-func (c *Controller) HandlePING(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandlePING(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	return resp.SimpleStringData{Data: "PONG"}, nil
 }
 
-func (c *Controller) HandleSET(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleSET(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -121,7 +132,7 @@ func (c *Controller) HandleSET(args []resp.BulkStringData) (resp.Data, *resp.Sim
 	return c.handleSet(args[0], args[1], args[2:]...)
 }
 
-func (c *Controller) HandleGET(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleGET(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -131,7 +142,7 @@ func (c *Controller) HandleGET(args []resp.BulkStringData) (resp.Data, *resp.Sim
 	return c.handleGet(args[0])
 }
 
-func (c *Controller) HandleRPUSH(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleRPUSH(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -141,7 +152,7 @@ func (c *Controller) HandleRPUSH(args []resp.BulkStringData) (resp.Data, *resp.S
 	return c.handleRPUSH(args[0], args[1:]...)
 }
 
-func (c *Controller) HandleLRANGE(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLRANGE(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 3 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -168,7 +179,7 @@ func (c *Controller) HandleLRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 	return c.handleLRANGE(keyData, int(from), int(to))
 }
 
-func (c *Controller) HandleLPUSH(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLPUSH(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -178,7 +189,7 @@ func (c *Controller) HandleLPUSH(args []resp.BulkStringData) (resp.Data, *resp.S
 	return c.handleLPUSH(args[0], args[1:]...)
 }
 
-func (c *Controller) HandleLLEN(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLLEN(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -188,7 +199,7 @@ func (c *Controller) HandleLLEN(args []resp.BulkStringData) (resp.Data, *resp.Si
 	return c.handleLLEN(args[0])
 }
 
-func (c *Controller) HandleLPOP(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLPOP(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -210,7 +221,7 @@ func (c *Controller) HandleLPOP(args []resp.BulkStringData) (resp.Data, *resp.Si
 	return c.handleLPOP(args[0], numItem)
 }
 
-func (c *Controller) HandleBLPOP(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleBLPOP(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -236,7 +247,7 @@ func (c *Controller) HandleBLPOP(args []resp.BulkStringData) (resp.Data, *resp.S
 	return c.handleBLPOP(keys, int64(timeoutInMs))
 }
 
-func (c *Controller) HandleTYPE(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleTYPE(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -248,7 +259,7 @@ func (c *Controller) HandleTYPE(args []resp.BulkStringData) (resp.Data, *resp.Si
 
 // HandleXADD handles stream add entry command.
 // example: redis-cli XADD stream_key 1526919030474-0 temperature 36 humidity 95
-func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXADD(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) < 4 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -274,7 +285,7 @@ func (c *Controller) HandleXADD(args []resp.BulkStringData) (resp.Data, *resp.Si
 
 // HandleXRANGE handles querying data from a stream.
 // example: redis-cli XRANGE stream_key 1526985054069 1526985054079
-func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXRANGE(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	// The sequence number doesn't need to be included in the start and end IDs
 	// provided to the command. If not provided, XRANGE defaults to a sequence
 	// number of 0 for the start and the maximum sequence number for the end.
@@ -329,7 +340,7 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData) (resp.Data, *resp.
 
 // HandleXREAD handles XREAD
 // example: redis-cli XREAD streams some_key 1526985054069-0
-func (c *Controller) HandleXREAD(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXREAD(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	// we loop untils we got the "STREAMS"
 	var timeoutInMs *int64
 loop:
@@ -405,7 +416,7 @@ loop:
 
 // HandleINCR handles INCR
 // example: redis-cli INCR foo
-func (c *Controller) HandleINCR(args []resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleINCR(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
 	if len(args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -413,4 +424,22 @@ func (c *Controller) HandleINCR(args []resp.BulkStringData) (resp.Data, *resp.Si
 		}
 	}
 	return c.handleINCR(args[0])
+}
+
+// HandleMULTI handles MULTI
+// example: $ redis-cli
+// > MULTI
+// OK
+// > SET foo 41
+// QUEUED
+// > INCR foo
+// QUEUED
+func (c *Controller) HandleMULTI(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(args) != 0 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'incr' command",
+		}
+	}
+	return c.handleMULTI(session)
 }

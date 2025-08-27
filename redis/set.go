@@ -17,6 +17,7 @@ func NewBLSet[T any]() *Set[T] {
 	}
 }
 
+// Set reuturn added data and boolean indicates if data is added successfuly.
 func (s *Set[T]) Set(key string, data *T) (*T, bool) {
 	_, found := s.data.Load(key)
 	if found {

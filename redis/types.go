@@ -78,3 +78,7 @@ func (e EntryID) Cmp(o EntryID) int {
 func (e InputEntryID) IsZero() bool {
 	return e.timestampMS == nil && e.sequenceNum == nil
 }
+
+type Session struct {
+	Hash string
+}

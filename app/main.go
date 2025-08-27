@@ -2,13 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
-	"strconv"
 
 	"github.com/codecrafters-io/redis-starter-go/redis"
-	"github.com/codecrafters-io/redis-starter-go/redis/resp"
 )
 
 func main() {
@@ -35,44 +32,6 @@ func main() {
 		}
 	}()
 	for conn := range conns {
-		go handleConnection(controller, conn)
-	}
-}
-
-func handleConnection(controller *redis.Controller, conn net.Conn) {
-	defer conn.Close()
-
-	parser := resp.Parser{}
-	for {
-		buf := make([]byte, 1024)
-		n, err := conn.Read(buf)
-		if err != nil {
-			if err == io.EOF {
-				return
-			}
-			fmt.Println("failed to read from conn", err)
-			return
-		}
-		data := buf[:n]
-		fmt.Println("receive", strconv.Quote(string(data)))
-		cmd, _, err := parser.ParseNext(data)
-		if err != nil {
-			fmt.Println("failed to get data:", err)
-			continue
-		}
-		switch data := cmd.(type) {
-		case resp.ArraysData:
-			res := controller.Handle(data)
-
-			_, err := conn.Write([]byte(res.String()))
-			if err != nil {
-				fmt.Println("failed to write to conn", err)
-				return
-			}
-			fmt.Println("return", resp.Raw(res))
-		default:
-			fmt.Println("unsupported")
-		}
-
+		go controller.Serve(conn)
 	}
 }

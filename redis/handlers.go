@@ -607,3 +607,20 @@ func (c *Controller) handleINCR(key resp.BulkStringData) (resp.Data, *resp.Simpl
 	record.Data.Data = fmt.Sprint(newValue)
 	return resp.Integer{Data: newValue}, nil
 }
+
+func (c *Controller) handleMULTI(session Session) (resp.Data, *resp.SimpleErrorData) {
+	if c.queue.Has(session.Hash) {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "MULTI calls can not be nested",
+		}
+	}
+	_, added := c.queue.Set(session.Hash, &[]HandlerFunc{})
+	if !added {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "failed to create MULTI session",
+		}
+	}
+	return resp.BulkStringData{Data: "OK"}, nil
+}
