@@ -57,12 +57,9 @@ func (c *Controller) handleGet(key resp.BulkStringData) (resp.Data, *resp.Simple
 		}
 	}
 	record := valueData.Data.(*SetValueString)
-	if record.isExpired {
-		return resp.NullBulkStringData{}, nil
-	}
-	if !record.Timeout.IsZero() &&
-		record.Timeout.Before(time.Now()) {
-		record.isExpired = true
+	if record.isExpired ||
+		(!record.Timeout.IsZero() && record.Timeout.Before(time.Now())) {
+		c.data.Remove(resp.Raw(key))
 		return resp.NullBulkStringData{}, nil
 	}
 	return record.Data, nil

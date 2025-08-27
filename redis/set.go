@@ -36,6 +36,10 @@ func (s *Set[T]) Get(key string) (*T, bool) {
 	return data.(*T), true
 }
 
+func (s *Set[T]) Remove(key string) {
+	s.data.Delete(key)
+}
+
 // Getsert return the value at the key key, if the key is not exists,
 // then value will be used..
 // The second value indicate if key is upserted or not.
