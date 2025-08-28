@@ -1,19 +1,33 @@
 package app
 
 import (
-	"flag"
+	"github.com/codecrafters-io/redis-starter-go/internal/app/server"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis"
 )
 
-// Config holds application config
-type Config struct {
-	Port int
+type App struct {
+	server     *server.Server
+	controller *redis.Controller
+	config     Config
 }
 
-func ParseConfig() Config {
-	var port int
-	flag.IntVar(&port, "port", 6379, "port that redis will listen on, (default: 6379)")
-	flag.Parse()
-	return Config{
-		Port: port,
+func New() *App {
+	config := parseConfig()
+	controllerOpts := redis.Options{
+		Role: redis.RoleMaster,
 	}
+	controller := redis.NewController(controllerOpts)
+	opts := server.Options{
+		Port: config.Port,
+	}
+	server := server.NewServer(controller, opts)
+	return &App{
+		config:     config,
+		controller: controller,
+		server:     server,
+	}
+}
+
+func (a *App) Start() {
+	panic(a.server.ListenAndServe())
 }

@@ -13,15 +13,15 @@ import (
 )
 
 type Controller struct {
-	data   *Set[Value]
-	logger *logrus.Logger
-
+	data     *Set[Value]
+	logger   *logrus.Logger
 	sessions *Set[Session]
+	queue    *Set[Queue]
 
-	queue *Set[Queue]
+	options Options
 }
 
-func NewController() *Controller {
+func NewController(opts Options) *Controller {
 	log := &logrus.Logger{
 		Out:       os.Stderr,
 		Formatter: new(logrus.TextFormatter),
@@ -33,6 +33,7 @@ func NewController() *Controller {
 		logger:   log,
 		sessions: NewBLSet[Session](),
 		queue:    NewBLSet[Queue](),
+		options:  opts,
 	}
 }
 
@@ -124,6 +125,9 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 
 	case "DISCARD":
 		handler = c.HandleDISCARD
+
+	case "INFO":
+		handler = c.HandleInfo
 
 	default:
 		return resp.SimpleErrorData{
@@ -533,4 +537,14 @@ func (c *Controller) HandleDISCARD(args []resp.BulkStringData, session Session) 
 		}
 	}
 	return c.handleDISCARD(session)
+}
+
+func (c *Controller) HandleInfo(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(args) != 1 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'info' command",
+		}
+	}
+	return c.handleINFO(args[0])
 }

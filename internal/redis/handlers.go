@@ -665,3 +665,12 @@ func (c *Controller) handleDISCARD(session Session) (resp.Data, *resp.SimpleErro
 	c.queue.Remove(session.Hash)
 	return resp.SimpleStringData{Data: "OK"}, nil
 }
+
+func (c *Controller) handleINFO(section resp.BulkStringData) (resp.Data, *resp.SimpleErrorData) {
+	builder := new(strings.Builder)
+	switch strings.ToLower(section.Data) {
+	case "replication":
+		fmt.Fprintf(builder, "role:%s\n", c.options.Role)
+	}
+	return resp.BulkStringData{Data: builder.String()}, nil
+}
