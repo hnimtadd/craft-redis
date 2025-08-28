@@ -62,27 +62,46 @@ func (c *Controller) connectToMaster() {
 	masterAddr := fmt.Sprintf("%s:%v", c.options.MasterHost, c.options.MasterPort)
 	c.logger.Infof("Connecting to MASTER %s", masterAddr)
 	for range retry {
-		conn, err := net.Dial("tcp", masterAddr)
+		err := c.Send(masterAddr, resp.ArraysData{
+			Datas: []resp.Data{resp.BulkStringData{Data: "PING"}},
+		})
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
 			continue
 		}
-		if err := c.Send(conn, resp.ArraysData{
+		c.logger.Info("Master replied to PING, replication can continue...")
+
+		err = c.Send(masterAddr, resp.ArraysData{
 			Datas: []resp.Data{
-				resp.BulkStringData{
-					Data: "PING",
-				},
+				resp.BulkStringData{Data: "REPLCONF"},
+				resp.BulkStringData{Data: "listening-port"},
+				resp.BulkStringData{Data: fmt.Sprint(c.options.SlavePort)},
 			},
-		}); err != nil {
+		})
+		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
 			continue
 		}
-		c.logger.Info("Master replied to PING, replication can continue...")
+		c.logger.Info("Master replied to 1st REPLCONF, replication can continue...")
+
+		err = c.Send(masterAddr, resp.ArraysData{
+			Datas: []resp.Data{
+				resp.BulkStringData{Data: "REPLCONF"},
+				resp.BulkStringData{Data: "capa"},
+				resp.BulkStringData{Data: "psync2"},
+			},
+		})
+		if err != nil {
+			c.logger.Infof("Error condition on socket: %s", err)
+			continue
+		}
+		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
 		return
 	}
 }
 
-func (c *Controller) Send(conn net.Conn, data resp.Data) error {
+func (c *Controller) Send(addr string, data resp.Data) error {
+	conn, err := net.Dial("tcp", addr)
 	dataBytes := []byte(data.String())
 	written, err := conn.Write(dataBytes)
 	if written != len(dataBytes) {

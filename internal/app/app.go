@@ -31,13 +31,19 @@ func New() (*App, error) {
 }
 
 func (a *App) initController() (*redis.Controller, error) {
-	opts := redis.Options{Role: replication.RoleMaster}
+	opts := redis.Options{}
 	if a.config.ReplicaOf != nil {
 		// By default, a Redis server assumes the "master" role. When --replicaof
 		// flag is passed, the server assumes the "slave" role instead.
 		opts.Role = replication.RoleSlave
 		opts.MasterHost = a.config.ReplicaOf.MasterHost
 		opts.MasterPort = a.config.ReplicaOf.MasterPort
+		opts.SlaveHost = "localhost"
+		opts.SlavePort = a.config.Port
+	} else {
+		opts.Role = replication.RoleMaster
+		opts.MasterHost = "localhost"
+		opts.MasterPort = a.config.Port
 	}
 
 	a.logger.Debug("init redis controller with config\n", opts)
