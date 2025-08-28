@@ -101,7 +101,11 @@ func (c *Controller) connectToMaster() {
 }
 
 func (c *Controller) Send(addr string, data resp.Data) error {
+	c.logger.Debug("sending", resp.Raw(data), "to", addr)
 	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
 	dataBytes := []byte(data.String())
 	written, err := conn.Write(dataBytes)
 	if written != len(dataBytes) {
