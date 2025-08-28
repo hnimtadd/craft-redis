@@ -201,6 +201,8 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 
 	case "INFO":
 		handler = c.HandleInfo
+	case "REPLCONF":
+		handler = c.HandleREPLCONF
 
 	default:
 		return resp.SimpleErrorData{
@@ -620,4 +622,8 @@ func (c *Controller) HandleInfo(args []resp.BulkStringData, session Session) (re
 		}
 	}
 	return c.handleINFO(args[0])
+}
+
+func (c *Controller) HandleREPLCONF(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+	return resp.BulkStringData{Data: "OK"}, nil
 }
