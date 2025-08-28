@@ -1,7 +1,7 @@
 package redis
 
 import (
-	"github.com/codecrafters-io/redis-starter-go/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
 )
 
 var (

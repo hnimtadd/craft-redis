@@ -7,7 +7,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/codecrafters-io/redis-starter-go/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
 )
 
 func (c *Controller) Serve(conn net.Conn) {

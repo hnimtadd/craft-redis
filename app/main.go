@@ -1,37 +1,20 @@
 package main
 
 import (
-	"fmt"
-	"net"
-	"os"
-
-	"github.com/codecrafters-io/redis-starter-go/redis"
+	"github.com/codecrafters-io/redis-starter-go/internal/app"
+	"github.com/codecrafters-io/redis-starter-go/internal/app/server"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis"
 )
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
-
-	// Uncomment this block to pass the first stage
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
-	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
-		os.Exit(1)
-	}
-	conns := make(chan net.Conn)
-
+	config := app.ParseConfig()
 	controller := redis.NewController()
-	go func() {
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				fmt.Println("Error accepting connection: ", err.Error())
-				return
-			}
-			conns <- conn
-		}
-	}()
-	for conn := range conns {
-		go controller.Serve(conn)
+
+	opts := server.Options{
+		Port: config.Port,
 	}
+
+	server := server.NewServer(controller, opts)
+
+	panic(server.ListenAndServe())
 }

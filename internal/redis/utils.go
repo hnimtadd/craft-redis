@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codecrafters-io/redis-starter-go/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
 	"github.com/codecrafters-io/redis-starter-go/utils"
 )
 
