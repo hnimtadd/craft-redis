@@ -36,6 +36,8 @@ func (a *App) initController() (*redis.Controller, error) {
 		// By default, a Redis server assumes the "master" role. When --replicaof
 		// flag is passed, the server assumes the "slave" role instead.
 		opts.Role = replication.RoleSlave
+		opts.MasterHost = a.config.ReplicaOf.MasterHost
+		opts.MasterPort = a.config.ReplicaOf.MasterPort
 	}
 
 	a.logger.Debug("init redis controller with config\n", opts)
@@ -52,15 +54,16 @@ func (a *App) initServer(controller *redis.Controller) (*server.Server, error) {
 }
 
 func (a *App) Start() {
-	a.logger.Debug("start the server with config\n", a.config)
 	controller, err := a.initController()
 	if err != nil {
 		a.logger.Fatalln("failed to create redis controller", err)
 	}
+
 	server, err := a.initServer(controller)
 	if err != nil {
 		a.logger.Fatalln("failed to create redis server", err)
 	}
+	a.logger.Info("Server initialized")
 
 	if err := server.ListenAndServe(); err != nil {
 		a.logger.Fatalln("stopped listener", err)

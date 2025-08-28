@@ -3,6 +3,7 @@ package redis
 import (
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -47,6 +48,47 @@ func NewController(opts Options) *Controller {
 		options:  opts,
 		repState: &rep,
 	}
+}
+
+func (c *Controller) Start() error {
+	if c.repState.Role == replication.RoleSlave {
+		c.connectToMaster()
+	}
+	return nil
+}
+
+func (c *Controller) connectToMaster() {
+	retry := 3
+	masterAddr := fmt.Sprintf("%s:%v", c.options.MasterHost, c.options.MasterPort)
+	c.logger.Infof("Connecting to MASTER %s", masterAddr)
+	for range retry {
+		conn, err := net.Dial("tcp", masterAddr)
+		if err != nil {
+			c.logger.Infof("Error condition on socket: %s", err)
+			continue
+		}
+		if err := c.Send(conn, resp.ArraysData{
+			Datas: []resp.Data{
+				resp.BulkStringData{
+					Data: "PING",
+				},
+			},
+		}); err != nil {
+			c.logger.Infof("Error condition on socket: %s", err)
+			continue
+		}
+		c.logger.Info("Master replied to PING, replication can continue...")
+		return
+	}
+}
+
+func (c *Controller) Send(conn net.Conn, data resp.Data) error {
+	dataBytes := []byte(data.String())
+	written, err := conn.Write(dataBytes)
+	if written != len(dataBytes) {
+		return fmt.Errorf("failed to write full command to connection")
+	}
+	return err
 }
 
 type (

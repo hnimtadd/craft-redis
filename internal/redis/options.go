@@ -8,7 +8,9 @@ import (
 )
 
 type Options struct {
-	Role replication.Role
+	Role       replication.Role
+	MasterHost string
+	MasterPort int
 }
 
 func (o Options) String() string {

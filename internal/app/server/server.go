@@ -33,8 +33,13 @@ func (s *Server) ListenAndServe() error {
 	if err != nil {
 		return fmt.Errorf("failed to bind to port %d", s.opts.Port)
 	}
-	conns := make(chan net.Conn)
+	if err := s.handler.Start(); err != nil {
+		return fmt.Errorf("failed to start controller: v", err)
+	}
 
+	s.logger.Info("Ready to accept connections tcp")
+
+	conns := make(chan net.Conn)
 	go func() {
 		for {
 			conn, err := l.Accept()
