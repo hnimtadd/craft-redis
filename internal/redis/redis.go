@@ -62,7 +62,13 @@ func (c *Controller) connectToMaster() {
 	masterAddr := fmt.Sprintf("%s:%v", c.options.MasterHost, c.options.MasterPort)
 	c.logger.Infof("Connecting to MASTER %s", masterAddr)
 	for range retry {
-		res, err := c.Send(masterAddr, resp.ArraysData{
+		conn, err := net.Dial("tcp", masterAddr)
+		if err != nil {
+			c.logger.Infof("Error condition on socket: %s", err)
+			continue
+		}
+		defer conn.Close()
+		res, err := c.Send(conn, resp.ArraysData{
 			Datas: []resp.Data{resp.BulkStringData{Data: "PING"}},
 		})
 		if err != nil {
@@ -72,7 +78,7 @@ func (c *Controller) connectToMaster() {
 		c.logger.Info("Master replied to PING, replication can continue...")
 		c.logger.Debug("received", resp.Raw(res))
 
-		res, err = c.Send(masterAddr, resp.ArraysData{
+		res, err = c.Send(conn, resp.ArraysData{
 			Datas: []resp.Data{
 				resp.BulkStringData{Data: "REPLCONF"},
 				resp.BulkStringData{Data: "listening-port"},
@@ -86,7 +92,7 @@ func (c *Controller) connectToMaster() {
 		c.logger.Info("Master replied to 1st REPLCONF, replication can continue...")
 		c.logger.Debug("received", resp.Raw(res))
 
-		res, err = c.Send(masterAddr, resp.ArraysData{
+		res, err = c.Send(conn, resp.ArraysData{
 			Datas: []resp.Data{
 				resp.BulkStringData{Data: "REPLCONF"},
 				resp.BulkStringData{Data: "capa"},
@@ -103,12 +109,8 @@ func (c *Controller) connectToMaster() {
 	}
 }
 
-func (c *Controller) Send(addr string, data resp.Data) (resp.Data, error) {
-	c.logger.Debug("sending", resp.Raw(data), "to", addr)
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, err
-	}
+func (c *Controller) Send(conn net.Conn, data resp.Data) (resp.Data, error) {
+	c.logger.Debug("sending", resp.Raw(data), "to", conn.RemoteAddr())
 	dataBytes := []byte(data.String())
 	written, err := conn.Write(dataBytes)
 	if written != len(dataBytes) {
