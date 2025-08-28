@@ -105,6 +105,21 @@ func (c *Controller) connectToMaster() {
 		}
 		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
 		c.logger.Debug("received", resp.Raw(res))
+
+		res, err = c.Send(conn, resp.ArraysData{
+			Datas: []resp.Data{
+				resp.BulkStringData{Data: "PSYNC"},
+				resp.BulkStringData{Data: "?"},
+				resp.BulkStringData{Data: "-1"},
+			},
+		})
+		if err != nil {
+			c.logger.Infof("Error condition on socket: %s", err)
+			continue
+		}
+		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
+		c.logger.Debug("received", resp.Raw(res))
+
 		return
 	}
 }
@@ -222,6 +237,9 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 		handler = c.HandleInfo
 	case "REPLCONF":
 		handler = c.HandleREPLCONF
+
+	case "PSYNC":
+		handler = c.HandlePSYNC
 
 	default:
 		return resp.SimpleErrorData{
@@ -644,5 +662,9 @@ func (c *Controller) HandleInfo(args []resp.BulkStringData, session Session) (re
 }
 
 func (c *Controller) HandleREPLCONF(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	return resp.BulkStringData{Data: "OK"}, nil
+	return c.handleREPLCONF()
+}
+
+func (c *Controller) HandlePSYNC(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+	return c.handlePSYNC()
 }

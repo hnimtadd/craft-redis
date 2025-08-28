@@ -676,3 +676,11 @@ func (c *Controller) handleINFO(section resp.BulkStringData) (resp.Data, *resp.S
 	}
 	return resp.BulkStringData{Data: builder.String()}, nil
 }
+
+func (c *Controller) handleREPLCONF() (resp.Data, *resp.SimpleErrorData) {
+	return resp.BulkStringData{Data: "OK"}, nil
+}
+
+func (c *Controller) handlePSYNC() (resp.Data, *resp.SimpleErrorData) {
+	return resp.SimpleStringData{Data: fmt.Sprintf("FULLRESYNC %s %d", c.repState.MasterReplID, c.repState.MasterReplOffset)}, nil
+}
