@@ -3,17 +3,12 @@ package redis
 import (
 	"fmt"
 	"strings"
-)
 
-type Role string
-
-const (
-	RoleMaster Role = "master"
-	RoleSlave  Role = "slave"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/state/replication"
 )
 
 type Options struct {
-	Role Role
+	Role replication.Role
 }
 
 func (o Options) String() string {

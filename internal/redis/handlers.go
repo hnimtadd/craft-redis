@@ -670,7 +670,9 @@ func (c *Controller) handleINFO(section resp.BulkStringData) (resp.Data, *resp.S
 	builder := new(strings.Builder)
 	switch strings.ToLower(section.Data) {
 	case "replication":
-		fmt.Fprintf(builder, "role:%s\n", c.options.Role)
+		fmt.Fprintf(builder, "role:%s\n", c.repState.Role)
+		fmt.Fprintf(builder, "master_replid:%s\n", c.repState.MasterReplID)
+		fmt.Fprintf(builder, "master_repl_offset:%v\n", c.repState.MasterReplOffset)
 	}
 	return resp.BulkStringData{Data: builder.String()}, nil
 }

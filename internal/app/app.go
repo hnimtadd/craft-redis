@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/codecrafters-io/redis-starter-go/internal/app/server"
 	"github.com/codecrafters-io/redis-starter-go/internal/redis"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/state/replication"
 	"github.com/sirupsen/logrus"
 )
 
@@ -11,8 +12,11 @@ type App struct {
 	logger *logrus.Logger
 }
 
-func New() *App {
-	config := parseConfig()
+func New() (*App, error) {
+	config, err := parseConfig()
+	if err != nil {
+		return nil, err
+	}
 	logger := logrus.New()
 	if config.Debug {
 		logger.SetLevel(logrus.DebugLevel)
@@ -23,15 +27,15 @@ func New() *App {
 	return &App{
 		config: config,
 		logger: logger,
-	}
+	}, nil
 }
 
 func (a *App) initController() (*redis.Controller, error) {
-	opts := redis.Options{Role: redis.RoleMaster}
-	if a.config.ReplicaOf != "" {
+	opts := redis.Options{Role: replication.RoleMaster}
+	if a.config.ReplicaOf != nil {
 		// By default, a Redis server assumes the "master" role. When --replicaof
 		// flag is passed, the server assumes the "slave" role instead.
-		opts.Role = redis.RoleSlave
+		opts.Role = replication.RoleSlave
 	}
 
 	a.logger.Debug("init redis controller with config\n", opts)

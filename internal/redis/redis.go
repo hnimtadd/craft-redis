@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/state/replication"
 	"github.com/codecrafters-io/redis-starter-go/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -19,6 +20,9 @@ type Controller struct {
 	queue    *Set[Queue]
 
 	options Options
+
+	// Master/replica replication information
+	repState *replication.Replication
 }
 
 func NewController(opts Options) *Controller {
@@ -28,12 +32,20 @@ func NewController(opts Options) *Controller {
 		Hooks:     make(logrus.LevelHooks),
 		Level:     logrus.DebugLevel,
 	}
+	rep := replication.Replication{
+		Role: opts.Role,
+	}
+	if opts.Role == replication.RoleMaster {
+		rep.MasterReplID = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+		rep.MasterReplOffset = 0
+	}
 	return &Controller{
 		data:     NewBLSet[Value](),
 		logger:   log,
 		sessions: NewBLSet[Session](),
 		queue:    NewBLSet[Queue](),
 		options:  opts,
+		repState: &rep,
 	}
 }
 
