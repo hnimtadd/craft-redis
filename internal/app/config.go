@@ -2,18 +2,33 @@ package app
 
 import (
 	"flag"
+	"fmt"
+	"strings"
 )
 
 // Config holds application config
 type Config struct {
-	Port int
+	Debug     bool
+	Port      int
+	ReplicaOf string
+}
+
+func (c Config) String() string {
+	builder := new(strings.Builder)
+	fmt.Fprintf(builder, "Debug: %v\n", c.Debug)
+	fmt.Fprintf(builder, "Port: %v\n", c.Port)
+	fmt.Fprintf(builder, "Replica Of: %v\n", c.ReplicaOf)
+	return builder.String()
 }
 
 func parseConfig() Config {
-	var port int
-	flag.IntVar(&port, "port", 6379, "port that redis will listen on, (default: 6379)")
+	portPtr := flag.Int("port", 6379, "port that redis will listen on, (default: 6379)")
+	replicaOfPtr := flag.String("replicaof", "", "")
+	debugPtr := flag.Bool("debug", false, "enable debug log, (default: false)")
 	flag.Parse()
 	return Config{
-		Port: port,
+		Port:      *portPtr,
+		ReplicaOf: *replicaOfPtr,
+		Debug:     *debugPtr,
 	}
 }
