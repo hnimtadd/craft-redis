@@ -62,7 +62,7 @@ func (c *Controller) connectToMaster() {
 	masterAddr := fmt.Sprintf("%s:%v", c.options.MasterHost, c.options.MasterPort)
 	c.logger.Infof("Connecting to MASTER %s", masterAddr)
 	for range retry {
-		err := c.Send(masterAddr, resp.ArraysData{
+		res, err := c.Send(masterAddr, resp.ArraysData{
 			Datas: []resp.Data{resp.BulkStringData{Data: "PING"}},
 		})
 		if err != nil {
@@ -70,8 +70,9 @@ func (c *Controller) connectToMaster() {
 			continue
 		}
 		c.logger.Info("Master replied to PING, replication can continue...")
+		c.logger.Debug("received", resp.Raw(res))
 
-		err = c.Send(masterAddr, resp.ArraysData{
+		res, err = c.Send(masterAddr, resp.ArraysData{
 			Datas: []resp.Data{
 				resp.BulkStringData{Data: "REPLCONF"},
 				resp.BulkStringData{Data: "listening-port"},
@@ -83,8 +84,9 @@ func (c *Controller) connectToMaster() {
 			continue
 		}
 		c.logger.Info("Master replied to 1st REPLCONF, replication can continue...")
+		c.logger.Debug("received", resp.Raw(res))
 
-		err = c.Send(masterAddr, resp.ArraysData{
+		res, err = c.Send(masterAddr, resp.ArraysData{
 			Datas: []resp.Data{
 				resp.BulkStringData{Data: "REPLCONF"},
 				resp.BulkStringData{Data: "capa"},
@@ -96,22 +98,33 @@ func (c *Controller) connectToMaster() {
 			continue
 		}
 		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
+		c.logger.Debug("received", resp.Raw(res))
 		return
 	}
 }
 
-func (c *Controller) Send(addr string, data resp.Data) error {
+func (c *Controller) Send(addr string, data resp.Data) (resp.Data, error) {
 	c.logger.Debug("sending", resp.Raw(data), "to", addr)
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	dataBytes := []byte(data.String())
 	written, err := conn.Write(dataBytes)
 	if written != len(dataBytes) {
-		return fmt.Errorf("failed to write full command to connection")
+		return nil, fmt.Errorf("failed to write full command to connection")
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	respBytes := make([]byte, 4096)
+	n, err := conn.Read(respBytes)
+	if err != nil {
+		return nil, err
+	}
+	parser := resp.Parser{}
+	cmd, _, err := parser.ParseNext(respBytes[:n])
+	return cmd, err
 }
 
 type (
