@@ -21,6 +21,7 @@ type (
 	ArraysData         struct {
 		Datas []Data
 	}
+	NullArraysData  struct{}
 	SimpleErrorData struct {
 		Type SimpleErrorType
 		Msg  string
@@ -62,4 +63,8 @@ func Raw(data Data) string {
 
 func (d Integer) String() string {
 	return fmt.Sprintf(":%d%s", d.Data, Terminator)
+}
+
+func (a NullArraysData) String() string {
+	return fmt.Sprintf("%s-1%s", string(TypeArrays), Terminator)
 }

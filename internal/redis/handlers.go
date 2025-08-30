@@ -317,7 +317,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 				Datas: []resp.Data{key, *ele},
 			}, nil
 		case <-time.After(time.Duration(timeoutInMs) * time.Millisecond):
-			return resp.ArraysData{}, nil
+			return resp.NullBulkStringData{}, nil
 		}
 	} else {
 		key := <-doneCh
@@ -531,7 +531,7 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 	for range len(keys) {
 		select {
 		case <-cancelCh:
-			return resp.ArraysData{}, nil
+			return resp.NullArraysData{}, nil
 		case record := <-doneCh:
 			key := record.key
 			entryID := record.entryID
