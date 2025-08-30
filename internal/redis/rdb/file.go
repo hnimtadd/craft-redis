@@ -3,18 +3,16 @@ package rdb
 import (
 	"encoding/hex"
 	"fmt"
+
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
 )
 
 type File struct {
 	Content []byte
 }
 
-func (f File) hash() string {
-	return string(hex.EncodeToString(f.Content))
-}
-
 func (f File) String() string {
-	return fmt.Sprintf("$%d\r\n%s", len(f.Content), f.hash())
+	return fmt.Sprintf("$%d%s%s", len(f.Content), resp.Terminator, f.Content)
 }
 
 var EmptyFile = func() File {
