@@ -317,7 +317,7 @@ func (c *Controller) handleBLPOP(keys []resp.BulkStringData, timeoutInMs int64) 
 				Datas: []resp.Data{key, *ele},
 			}, nil
 		case <-time.After(time.Duration(timeoutInMs) * time.Millisecond):
-			return resp.NullBulkStringData{}, nil
+			return resp.NullArraysData{}, nil
 		}
 	} else {
 		key := <-doneCh
