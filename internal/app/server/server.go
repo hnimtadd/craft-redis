@@ -34,7 +34,7 @@ func (s *Server) ListenAndServe() error {
 		return fmt.Errorf("failed to bind to port %d", s.opts.Port)
 	}
 	if err := s.handler.Start(); err != nil {
-		return fmt.Errorf("failed to start controller: v", err)
+		return fmt.Errorf("failed to start controller: %v", err)
 	}
 
 	s.logger.Info("Ready to accept connections tcp")

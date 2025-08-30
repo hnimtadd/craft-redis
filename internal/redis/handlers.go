@@ -2,7 +2,6 @@ package redis
 
 import (
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -686,24 +685,10 @@ func (c *Controller) handleREPLCONF(conf replication.Config, session Session) (r
 }
 
 func (c *Controller) handlePSYNC(session Session) (resp.Data, *resp.SimpleErrorData) {
-	replicaConf, found := c.replicas.Get(session.Hash)
-	if !found {
-		return nil, &resp.SimpleErrorData{
-			Type: resp.SimpleErrorTypeGeneric,
-			Msg:  "PSYNC from unknown replica",
-		}
-	}
 	go func() {
-		c.logger.Debug("sending rdb file")
 		time.Sleep(time.Second)
-		c.logger.Info("dialing", replicaConf.RemoteAddr)
-		conn, err := net.Dial("tcp", replicaConf.RemoteAddr)
-		if err != nil {
-			c.logger.Infof("Error condition on socket: %s", err)
-			return
-		}
-
-		resp, err := c.Send(conn, rdb.EmptyFile)
+		c.logger.Debug("sending rdb file")
+		resp, err := c.Send(session.Conn, rdb.EmptyFile)
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
 			return

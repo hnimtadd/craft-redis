@@ -70,12 +70,12 @@ func (c *Controller) connectToMaster() {
 			c.logger.Infof("Error condition on socket: %s", err)
 			continue
 		}
-		defer conn.Close()
 		res, err := c.Send(conn, resp.ArraysData{
 			Datas: []resp.Data{resp.BulkStringData{Data: "PING"}},
 		})
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
+			conn.Close()
 			continue
 		}
 		c.logger.Info("Master replied to PING, replication can continue...")
@@ -90,6 +90,7 @@ func (c *Controller) connectToMaster() {
 		})
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
+			conn.Close()
 			continue
 		}
 		c.logger.Info("Master replied to 1st REPLCONF, replication can continue...")
@@ -104,6 +105,7 @@ func (c *Controller) connectToMaster() {
 		})
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
+			conn.Close()
 			continue
 		}
 		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
@@ -118,11 +120,14 @@ func (c *Controller) connectToMaster() {
 		})
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
+			conn.Close()
 			continue
 		}
 		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
 		c.logger.Debug("received", resp.Raw(res))
 
+		c.logger.Info("Handshake done")
+		go c.Serve(conn)
 		return
 	}
 }
@@ -681,15 +686,7 @@ func (c *Controller) HandleREPLCONF(args []resp.BulkStringData, session Session)
 				Msg:  "value is not an integer or out of range",
 			}
 		}
-		parts := strings.Split(session.RemoteAddr, ":")
-		if len(parts) < 2 {
-			return nil, &resp.SimpleErrorData{
-				Type: resp.SimpleErrorTypeGeneric,
-				Msg:  "receive invalid session addr" + session.RemoteAddr,
-			}
-		}
-		addr := fmt.Sprintf("%s:%d", strings.Join(parts[:len(parts)-1], ":"), port)
-		replicaConfig.RemoteAddr = addr
+		replicaConfig.ListeningPort = int(port)
 	}
 	return c.handleREPLCONF(replicaConfig, session)
 }

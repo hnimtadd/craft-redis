@@ -14,5 +14,5 @@ type Replication struct {
 }
 
 type Config struct {
-	RemoteAddr string
+	ListeningPort int
 }

@@ -2,6 +2,7 @@ package redis
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
@@ -82,4 +83,5 @@ func (e InputEntryID) IsZero() bool {
 type Session struct {
 	Hash       string
 	RemoteAddr string
+	Conn       net.Conn
 }
