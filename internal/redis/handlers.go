@@ -531,7 +531,7 @@ func (c *Controller) handleXREAD(keys []resp.BulkStringData, entriesID []EntryID
 	for range len(keys) {
 		select {
 		case <-cancelCh:
-			return resp.NullBulkStringData{}, nil
+			return resp.ArraysData{}, nil
 		case record := <-doneCh:
 			key := record.key
 			entryID := record.entryID
