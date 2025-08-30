@@ -27,7 +27,7 @@ func NewServer(handler *redis.Controller, opts Options) *Server {
 }
 
 func (s *Server) ListenAndServe() error {
-	addr := fmt.Sprintf("0.0.0.0:%d", s.opts.Port)
+	addr := fmt.Sprintf("127.0.0.1:%d", s.opts.Port)
 	s.logger.Info("listening at ", addr)
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
