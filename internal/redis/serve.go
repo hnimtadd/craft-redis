@@ -16,7 +16,10 @@ func (c *Controller) Serve(conn net.Conn) {
 	hasher := sha256.New()
 	hashBytes := hasher.Sum([]byte(remoteAddr + localAdd))
 	hash := string(hashBytes)
-	session := Session{Hash: hash}
+	session := Session{
+		Hash:       hash,
+		RemoteAddr: conn.RemoteAddr().String(),
+	}
 	c.sessions.Set(hash, &session)
 	defer func() {
 		c.logger.Debug("cleaning connection...")

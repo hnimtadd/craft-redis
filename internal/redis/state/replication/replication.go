@@ -12,3 +12,7 @@ type Replication struct {
 	MasterReplID     string
 	MasterReplOffset int
 }
+
+type Config struct {
+	RemoteAddr string
+}

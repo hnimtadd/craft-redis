@@ -23,7 +23,9 @@ type Controller struct {
 	options Options
 
 	// Master/replica replication information
-	repState *replication.Replication
+	replicatioinState *replication.Replication
+
+	replicas *Set[replication.Config]
 }
 
 func NewController(opts Options) *Controller {
@@ -41,17 +43,18 @@ func NewController(opts Options) *Controller {
 		rep.MasterReplOffset = 0
 	}
 	return &Controller{
-		data:     NewBLSet[Value](),
-		logger:   log,
-		sessions: NewBLSet[Session](),
-		queue:    NewBLSet[Queue](),
-		options:  opts,
-		repState: &rep,
+		data:              NewBLSet[Value](),
+		logger:            log,
+		sessions:          NewBLSet[Session](),
+		queue:             NewBLSet[Queue](),
+		options:           opts,
+		replicatioinState: &rep,
+		replicas:          NewBLSet[replication.Config](),
 	}
 }
 
 func (c *Controller) Start() error {
-	if c.repState.Role == replication.RoleSlave {
+	if c.replicatioinState.Role == replication.RoleSlave {
 		c.connectToMaster()
 	}
 	return nil
@@ -662,9 +665,35 @@ func (c *Controller) HandleInfo(args []resp.BulkStringData, session Session) (re
 }
 
 func (c *Controller) HandleREPLCONF(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	return c.handleREPLCONF()
+	if len(args) != 2 {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "wrong number of arguments for 'replconf' command",
+		}
+	}
+	replicaConfig := replication.Config{}
+	switch strings.ToLower(args[0].Data) {
+	case "listening-port":
+		port, err := strconv.ParseUint(args[1].Data, 10, 64)
+		if err != nil {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "value is not an integer or out of range",
+			}
+		}
+		parts := strings.Split(session.RemoteAddr, ":")
+		if len(parts) < 2 {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "receive invalid session addr" + session.RemoteAddr,
+			}
+		}
+		addr := fmt.Sprintf("%s:%d", strings.Join(parts[:len(parts)-1], ":"), port)
+		replicaConfig.RemoteAddr = addr
+	}
+	return c.handleREPLCONF(replicaConfig, session)
 }
 
 func (c *Controller) HandlePSYNC(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	return c.handlePSYNC()
+	return c.handlePSYNC(session)
 }

@@ -80,5 +80,6 @@ func (e InputEntryID) IsZero() bool {
 }
 
 type Session struct {
-	Hash string
+	Hash       string
+	RemoteAddr string
 }

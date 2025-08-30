@@ -2,11 +2,14 @@ package redis
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/rdb"
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/internal/redis/state/replication"
 	"github.com/codecrafters-io/redis-starter-go/utils"
 )
 
@@ -670,17 +673,42 @@ func (c *Controller) handleINFO(section resp.BulkStringData) (resp.Data, *resp.S
 	builder := new(strings.Builder)
 	switch strings.ToLower(section.Data) {
 	case "replication":
-		fmt.Fprintf(builder, "role:%s\n", c.repState.Role)
-		fmt.Fprintf(builder, "master_replid:%s\n", c.repState.MasterReplID)
-		fmt.Fprintf(builder, "master_repl_offset:%v\n", c.repState.MasterReplOffset)
+		fmt.Fprintf(builder, "role:%s\n", c.replicatioinState.Role)
+		fmt.Fprintf(builder, "master_replid:%s\n", c.replicatioinState.MasterReplID)
+		fmt.Fprintf(builder, "master_repl_offset:%v\n", c.replicatioinState.MasterReplOffset)
 	}
 	return resp.BulkStringData{Data: builder.String()}, nil
 }
 
-func (c *Controller) handleREPLCONF() (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleREPLCONF(conf replication.Config, session Session) (resp.Data, *resp.SimpleErrorData) {
+	c.replicas.Set(session.Hash, &conf)
 	return resp.BulkStringData{Data: "OK"}, nil
 }
 
-func (c *Controller) handlePSYNC() (resp.Data, *resp.SimpleErrorData) {
-	return resp.SimpleStringData{Data: fmt.Sprintf("FULLRESYNC %s %d", c.repState.MasterReplID, c.repState.MasterReplOffset)}, nil
+func (c *Controller) handlePSYNC(session Session) (resp.Data, *resp.SimpleErrorData) {
+	replicaConf, found := c.replicas.Get(session.Hash)
+	if !found {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "PSYNC from unknown replica",
+		}
+	}
+	go func() {
+		c.logger.Debug("sending rdb file")
+		time.Sleep(time.Second)
+		c.logger.Info("dialing", replicaConf.RemoteAddr)
+		conn, err := net.Dial("tcp", replicaConf.RemoteAddr)
+		if err != nil {
+			c.logger.Infof("Error condition on socket: %s", err)
+			return
+		}
+
+		resp, err := c.Send(conn, rdb.EmptyFile)
+		if err != nil {
+			c.logger.Infof("Error condition on socket: %s", err)
+			return
+		}
+		c.logger.Info("rdb file response", resp)
+	}()
+	return resp.SimpleStringData{Data: fmt.Sprintf("FULLRESYNC %s %d", c.replicatioinState.MasterReplID, c.replicatioinState.MasterReplOffset)}, nil
 }
