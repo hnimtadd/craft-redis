@@ -618,11 +618,7 @@ func (c *Controller) handleMULTI(session Session) (resp.Data, *resp.SimpleErrorD
 		}
 	}
 	_, added := c.queue.Set(session.Hash, &Queue{
-		commands: []struct {
-			handler     HandlerFunc
-			args        []resp.BulkStringData
-			sessionInfo Session
-		}{},
+		commands: []QueueCommand{},
 	})
 	if !added {
 		return nil, &resp.SimpleErrorData{
@@ -645,7 +641,7 @@ func (c *Controller) handleEXEC(session Session) (resp.Data, *resp.SimpleErrorDa
 		Datas: make([]resp.Data, len(queue.commands)),
 	}
 	for idx, command := range queue.commands {
-		res, err := command.handler(command.args, command.sessionInfo)
+		res, err := command.handler(command.cmd, command.session)
 		if err != nil {
 			result.Datas[idx] = err
 		} else {
@@ -672,19 +668,31 @@ func (c *Controller) handleINFO(section resp.BulkStringData) (resp.Data, *resp.S
 	builder := new(strings.Builder)
 	switch strings.ToLower(section.Data) {
 	case "replication":
-		fmt.Fprintf(builder, "role:%s\n", c.replicatioinState.Role)
-		fmt.Fprintf(builder, "master_replid:%s\n", c.replicatioinState.MasterReplID)
-		fmt.Fprintf(builder, "master_repl_offset:%v\n", c.replicatioinState.MasterReplOffset)
+		fmt.Fprintf(builder, "role:%s\n", c.replicationState.Role)
+		fmt.Fprintf(builder, "master_replid:%s\n", c.replicationState.MasterReplID)
+		fmt.Fprintf(builder, "master_repl_offset:%v\n", c.replicationState.MasterReplOffset)
 	}
 	return resp.BulkStringData{Data: builder.String()}, nil
 }
 
 func (c *Controller) handleREPLCONF(conf replication.Config, session Session) (resp.Data, *resp.SimpleErrorData) {
-	c.replicas.Set(session.Hash, &conf)
+	replica := replication.Replica{
+		Config:  conf,
+		Conn:    session.Conn,
+		IsReady: false,
+	}
+	c.replicationState.replicas.Set(session.Hash, &replica)
 	return resp.BulkStringData{Data: "OK"}, nil
 }
 
 func (c *Controller) handlePSYNC(session Session) (resp.Data, *resp.SimpleErrorData) {
+	replica, found := c.replicationState.replicas.Get(session.Hash)
+	if !found {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "replication config not found",
+		}
+	}
 	go func() {
 		time.Sleep(time.Second)
 		c.logger.Debug("sending rdb file")
@@ -694,6 +702,7 @@ func (c *Controller) handlePSYNC(session Session) (resp.Data, *resp.SimpleErrorD
 			return
 		}
 		c.logger.Info("rdb file response", resp)
+		replica.IsReady = true
 	}()
-	return resp.SimpleStringData{Data: fmt.Sprintf("FULLRESYNC %s %d", c.replicatioinState.MasterReplID, c.replicatioinState.MasterReplOffset)}, nil
+	return resp.SimpleStringData{Data: fmt.Sprintf("FULLRESYNC %s %d", c.replicationState.MasterReplID, c.replicationState.MasterReplOffset)}, nil
 }

@@ -57,3 +57,17 @@ func (s *Set[T]) Has(key string) bool {
 	_, found := s.data.Load(key)
 	return found
 }
+
+func (s *Set[T]) ForEach(handler func(string, *T) bool) {
+	s.data.Range(func(key, value any) bool {
+		keyStr, ok := key.(string)
+		if !ok {
+			return false
+		}
+		valT, ok := value.(*T)
+		if !ok {
+			return false
+		}
+		return handler(keyStr, valT)
+	})
+}

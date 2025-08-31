@@ -1,5 +1,7 @@
 package replication
 
+import "net"
+
 type Role string
 
 const (
@@ -7,10 +9,10 @@ const (
 	RoleSlave  Role = "slave"
 )
 
-type Replication struct {
-	Role             Role
-	MasterReplID     string
-	MasterReplOffset int
+type Replica struct {
+	Config  Config
+	Conn    net.Conn
+	IsReady bool
 }
 
 type Config struct {

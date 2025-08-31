@@ -23,9 +23,7 @@ type Controller struct {
 	options Options
 
 	// Master/replica replication information
-	replicatioinState *replication.Replication
-
-	replicas *Set[replication.Config]
+	replicationState *ReplicationState
 }
 
 func NewController(opts Options) *Controller {
@@ -35,7 +33,7 @@ func NewController(opts Options) *Controller {
 		Hooks:     make(logrus.LevelHooks),
 		Level:     logrus.DebugLevel,
 	}
-	rep := replication.Replication{
+	rep := ReplicationState{
 		Role: opts.Role,
 	}
 	if opts.Role == replication.RoleMaster {
@@ -43,18 +41,17 @@ func NewController(opts Options) *Controller {
 		rep.MasterReplOffset = 0
 	}
 	return &Controller{
-		data:              NewBLSet[Value](),
-		logger:            log,
-		sessions:          NewBLSet[Session](),
-		queue:             NewBLSet[Queue](),
-		options:           opts,
-		replicatioinState: &rep,
-		replicas:          NewBLSet[replication.Config](),
+		data:             NewBLSet[Value](),
+		logger:           log,
+		sessions:         NewBLSet[Session](),
+		queue:            NewBLSet[Queue](),
+		options:          opts,
+		replicationState: &rep,
 	}
 }
 
 func (c *Controller) Start() error {
-	if c.replicatioinState.Role == replication.RoleSlave {
+	if c.replicationState.Role == replication.RoleSlave {
 		c.connectToMaster()
 	}
 	return nil
@@ -153,15 +150,42 @@ func (c *Controller) Send(conn net.Conn, data resp.Data) (resp.Data, error) {
 }
 
 type (
-	HandlerFunc func([]resp.BulkStringData, Session) (resp.Data, *resp.SimpleErrorData)
-	Queue       struct {
-		commands []struct {
-			handler     HandlerFunc
-			args        []resp.BulkStringData
-			sessionInfo Session
-		}
+	HandlerFunc  func(command, Session) (resp.Data, *resp.SimpleErrorData)
+	QueueCommand struct {
+		handler HandlerFunc
+		cmd     command
+		session Session
+	}
+	Queue struct {
+		commands []QueueCommand
 	}
 )
+
+func (c *Controller) ReplicaMiddleware(next HandlerFunc) HandlerFunc {
+	return func(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+		res, err := next(cmd, session)
+		if err != nil {
+			return res, err
+		}
+		go func() {
+			datas := make([]resp.Data, len(cmd.args)+1)
+			datas[0] = cmd.cmd
+			for idx, arg := range cmd.args {
+				datas[idx+1] = arg
+			}
+			fullCmd := resp.ArraysData{Datas: datas}
+			handler := func(sessionHash string, r *replication.Replica) bool {
+				if r.IsReady {
+					c.Send(r.Conn, fullCmd)
+				}
+				// returning true means we continue
+				return true
+			}
+			c.replicationState.replicas.ForEach(handler)
+		}()
+		return nil, nil
+	}
+}
 
 func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data {
 	cmd, err := parse(data)
@@ -255,7 +279,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 			Msg:  fmt.Sprintf("unknown command '%s'", cmd.cmd.Data),
 		}
 	}
-	res, err := handler(cmd.args, sessionInfo)
+	res, err := handler(*cmd, sessionInfo)
 	if err != nil {
 		return err
 	}
@@ -263,78 +287,74 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 }
 
 func (c *Controller) MULTIMiddleware(next HandlerFunc) HandlerFunc {
-	return func(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+	return func(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
 		if !c.queue.Has(session.Hash) {
-			return next(args, session)
+			return next(cmd, session)
 		}
 		queue, _ := c.queue.Get(session.Hash)
-		queue.commands = append(queue.commands, struct {
-			handler     HandlerFunc
-			args        []resp.BulkStringData
-			sessionInfo Session
-		}{
-			handler:     next,
-			args:        args,
-			sessionInfo: session,
+		queue.commands = append(queue.commands, QueueCommand{
+			handler: next,
+			cmd:     cmd,
+			session: session,
 		})
 		return resp.SimpleStringData{Data: "QUEUED"}, nil
 	}
 }
 
-func (c *Controller) HandleECHO(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) == 0 {
+func (c *Controller) HandleECHO(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) == 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'echo' command",
 		}
 	}
-	return args[0], nil
+	return cmd.args[0], nil
 }
 
-func (c *Controller) HandlePING(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandlePING(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
 	return resp.SimpleStringData{Data: "PONG"}, nil
 }
 
-func (c *Controller) HandleSET(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) < 2 {
+func (c *Controller) HandleSET(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'set' command",
 		}
 	}
-	return c.handleSet(args[0], args[1], args[2:]...)
+	return c.handleSet(cmd.args[0], cmd.args[1], cmd.args[2:]...)
 }
 
-func (c *Controller) HandleGET(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 1 {
+func (c *Controller) HandleGET(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'get' command",
 		}
 	}
-	return c.handleGet(args[0])
+	return c.handleGet(cmd.args[0])
 }
 
-func (c *Controller) HandleRPUSH(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) < 2 {
+func (c *Controller) HandleRPUSH(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'rpush' command",
 		}
 	}
-	return c.handleRPUSH(args[0], args[1:]...)
+	return c.handleRPUSH(cmd.args[0], cmd.args[1:]...)
 }
 
-func (c *Controller) HandleLRANGE(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 3 {
+func (c *Controller) HandleLRANGE(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 3 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'lrange' command",
 		}
 	}
-	keyData := args[0]
-	fromString := args[1].Data
-	toString := args[2].Data
+	keyData := cmd.args[0]
+	fromString := cmd.args[1].Data
+	toString := cmd.args[2].Data
 	from, err := strconv.ParseInt(fromString, 10, 32)
 	if err != nil {
 		return nil, &resp.SimpleErrorData{
@@ -352,36 +372,36 @@ func (c *Controller) HandleLRANGE(args []resp.BulkStringData, session Session) (
 	return c.handleLRANGE(keyData, int(from), int(to))
 }
 
-func (c *Controller) HandleLPUSH(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) < 2 {
+func (c *Controller) HandleLPUSH(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'lpush' command",
 		}
 	}
-	return c.handleLPUSH(args[0], args[1:]...)
+	return c.handleLPUSH(cmd.args[0], cmd.args[1:]...)
 }
 
-func (c *Controller) HandleLLEN(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 1 {
+func (c *Controller) HandleLLEN(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'llen' command",
 		}
 	}
-	return c.handleLLEN(args[0])
+	return c.handleLLEN(cmd.args[0])
 }
 
-func (c *Controller) HandleLPOP(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) < 1 {
+func (c *Controller) HandleLPOP(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) < 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'lpop' command",
 		}
 	}
 	var numItem uint64 = 1
-	if len(args) == 2 {
-		argString := args[1].Data
+	if len(cmd.args) == 2 {
+		argString := cmd.args[1].Data
 		parsed, err := strconv.ParseUint(argString, 10, 64)
 		if err != nil {
 			return nil, &resp.SimpleErrorData{
@@ -391,17 +411,17 @@ func (c *Controller) HandleLPOP(args []resp.BulkStringData, session Session) (re
 		}
 		numItem = parsed
 	}
-	return c.handleLPOP(args[0], numItem)
+	return c.handleLPOP(cmd.args[0], numItem)
 }
 
-func (c *Controller) HandleBLPOP(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) < 2 {
+func (c *Controller) HandleBLPOP(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'blpop' command",
 		}
 	}
-	timeoutInSecString := args[len(args)-1].Data
+	timeoutInSecString := cmd.args[len(cmd.args)-1].Data
 	timeoutInSec, err := strconv.ParseFloat(timeoutInSecString, 64)
 	if err != nil {
 		return nil, &resp.SimpleErrorData{
@@ -416,35 +436,35 @@ func (c *Controller) HandleBLPOP(args []resp.BulkStringData, session Session) (r
 		}
 	}
 	timeoutInMs := timeoutInSec * 1000
-	keys := args[0 : len(args)-1]
+	keys := cmd.args[0 : len(cmd.args)-1]
 	return c.handleBLPOP(keys, int64(timeoutInMs))
 }
 
-func (c *Controller) HandleTYPE(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 1 {
+func (c *Controller) HandleTYPE(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'type' command",
 		}
 	}
-	return c.handleTYPE(args[0])
+	return c.handleTYPE(cmd.args[0])
 }
 
 // HandleXADD handles stream add entry command.
 // example: redis-cli XADD stream_key 1526919030474-0 temperature 36 humidity 95
-func (c *Controller) HandleXADD(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) < 4 {
+func (c *Controller) HandleXADD(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) < 4 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'xadd' command",
 		}
 	}
 
-	key := args[0]
-	entryID := args[1]
-	kvs := args[2:]
-	// ensure we have valid kv args
-	if len(args)%2 != 0 {
+	key := cmd.args[0]
+	entryID := cmd.args[1]
+	kvs := cmd.args[2:]
+	// ensure we have valid kv cmd.args
+	if len(cmd.args)%2 != 0 {
 		return nil, &ErrInvalidArgs
 	}
 
@@ -458,24 +478,24 @@ func (c *Controller) HandleXADD(args []resp.BulkStringData, session Session) (re
 
 // HandleXRANGE handles querying data from a stream.
 // example: redis-cli XRANGE stream_key 1526985054069 1526985054079
-func (c *Controller) HandleXRANGE(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXRANGE(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
 	// The sequence number doesn't need to be included in the start and end IDs
 	// provided to the command. If not provided, XRANGE defaults to a sequence
 	// number of 0 for the start and the maximum sequence number for the end.
-	if len(args) < 1 {
+	if len(cmd.args) < 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'xrange' command",
 		}
 	}
-	key := args[0]
+	key := cmd.args[0]
 	var start, end InputEntryID
 	var err *resp.SimpleErrorData
 
-	if len(args) == 3 {
-		start, err = parseStreamEntryID(args[1])
+	if len(cmd.args) == 3 {
+		start, err = parseStreamEntryID(cmd.args[1])
 		if err != nil {
-			startUint, err := strconv.ParseUint(args[1].Data, 10, 64)
+			startUint, err := strconv.ParseUint(cmd.args[1].Data, 10, 64)
 			if err != nil {
 				return nil, &resp.SimpleErrorData{
 					Type: resp.SimpleErrorTypeGeneric,
@@ -488,9 +508,9 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData, session Session) (
 			}
 		}
 
-		end, err = parseStreamEntryID(args[2])
+		end, err = parseStreamEntryID(cmd.args[2])
 		if err != nil {
-			endUint, err := strconv.ParseUint(args[2].Data, 10, 64)
+			endUint, err := strconv.ParseUint(cmd.args[2].Data, 10, 64)
 			if err != nil {
 				return nil, &resp.SimpleErrorData{
 					Type: resp.SimpleErrorTypeGeneric,
@@ -513,24 +533,24 @@ func (c *Controller) HandleXRANGE(args []resp.BulkStringData, session Session) (
 
 // HandleXREAD handles XREAD
 // example: redis-cli XREAD streams some_key 1526985054069-0
-func (c *Controller) HandleXREAD(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXREAD(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
 	// we loop untils we got the "STREAMS"
 	var timeoutInMs *int64
 loop:
-	for idx := 0; idx < len(args); idx++ {
-		arg := args[idx]
+	for idx := 0; idx < len(cmd.args); idx++ {
+		arg := cmd.args[idx]
 		switch strings.ToUpper(arg.Data) {
 		case "STREAMS":
-			args = args[idx+1:]
+			cmd.args = cmd.args[idx+1:]
 			break loop
 		case "BLOCK":
-			if idx+1 >= len(args) {
+			if idx+1 >= len(cmd.args) {
 				return nil, &resp.SimpleErrorData{
 					Type: resp.SimpleErrorTypeGeneric,
 					Msg:  "wrong number of arguments for 'xread' command",
 				}
 			}
-			blockTimeInMsString := args[idx+1].Data
+			blockTimeInMsString := cmd.args[idx+1].Data
 
 			blockTimeUint, err := strconv.ParseUint(blockTimeInMsString, 10, 64)
 			if err != nil {
@@ -543,14 +563,14 @@ loop:
 		}
 	}
 	// we omit 1 entry for 'STREAMS'
-	if len(args) < 2 || len(args)%2 != 0 {
+	if len(cmd.args) < 2 || len(cmd.args)%2 != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'xread' command",
 		}
 	}
-	entryIDsData := args[len(args)/2:]
-	keys := args[0 : len(args)/2]
+	entryIDsData := cmd.args[len(cmd.args)/2:]
+	keys := cmd.args[0 : len(cmd.args)/2]
 	entryIDs := make([]EntryID, len(entryIDsData))
 	for idx, entryID := range entryIDsData {
 		switch entryID.Data {
@@ -589,14 +609,14 @@ loop:
 
 // HandleINCR handles INCR
 // example: redis-cli INCR foo
-func (c *Controller) HandleINCR(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 1 {
+func (c *Controller) HandleINCR(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'incr' command",
 		}
 	}
-	return c.handleINCR(args[0])
+	return c.handleINCR(cmd.args[0])
 }
 
 // HandleMULTI handles MULTI
@@ -607,8 +627,8 @@ func (c *Controller) HandleINCR(args []resp.BulkStringData, session Session) (re
 // QUEUED
 // > INCR foo
 // QUEUED
-func (c *Controller) HandleMULTI(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 0 {
+func (c *Controller) HandleMULTI(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'incr' command",
@@ -628,8 +648,8 @@ func (c *Controller) HandleMULTI(args []resp.BulkStringData, session Session) (r
 // > EXEC
 // 1. OK
 // 2. 42
-func (c *Controller) HandleEXEC(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 0 {
+func (c *Controller) HandleEXEC(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'exec' command",
@@ -649,8 +669,8 @@ func (c *Controller) HandleEXEC(args []resp.BulkStringData, session Session) (re
 // > DISCARD
 // OK
 // . 42
-func (c *Controller) HandleDISCARD(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 0 {
+func (c *Controller) HandleDISCARD(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'exec' command",
@@ -659,27 +679,27 @@ func (c *Controller) HandleDISCARD(args []resp.BulkStringData, session Session) 
 	return c.handleDISCARD(session)
 }
 
-func (c *Controller) HandleInfo(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 1 {
+func (c *Controller) HandleInfo(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'info' command",
 		}
 	}
-	return c.handleINFO(args[0])
+	return c.handleINFO(cmd.args[0])
 }
 
-func (c *Controller) HandleREPLCONF(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
-	if len(args) != 2 {
+func (c *Controller) HandleREPLCONF(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+	if len(cmd.args) != 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'replconf' command",
 		}
 	}
 	replicaConfig := replication.Config{}
-	switch strings.ToLower(args[0].Data) {
+	switch strings.ToLower(cmd.args[0].Data) {
 	case "listening-port":
-		port, err := strconv.ParseUint(args[1].Data, 10, 64)
+		port, err := strconv.ParseUint(cmd.args[1].Data, 10, 64)
 		if err != nil {
 			return nil, &resp.SimpleErrorData{
 				Type: resp.SimpleErrorTypeGeneric,
@@ -691,6 +711,6 @@ func (c *Controller) HandleREPLCONF(args []resp.BulkStringData, session Session)
 	return c.handleREPLCONF(replicaConfig, session)
 }
 
-func (c *Controller) HandlePSYNC(args []resp.BulkStringData, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandlePSYNC(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
 	return c.handlePSYNC(session)
 }
