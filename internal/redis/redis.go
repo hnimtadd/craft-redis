@@ -208,6 +208,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 	case "SET":
 		handler = c.HandleSET
 		handler = c.MULTIMiddleware(handler)
+		handler = c.ReplicaMiddleware(handler)
 
 	case "GET":
 		handler = c.HandleGET
@@ -216,7 +217,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 	case "RPUSH":
 		handler = c.HandleRPUSH
 		handler = c.MULTIMiddleware(handler)
-
+		handler = c.ReplicaMiddleware(handler)
 	case "LRANGE":
 		handler = c.HandleLRANGE
 		handler = c.MULTIMiddleware(handler)
@@ -224,6 +225,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 	case "LPUSH":
 		handler = c.HandleLPUSH
 		handler = c.MULTIMiddleware(handler)
+		handler = c.ReplicaMiddleware(handler)
 
 	case "LLEN":
 		handler = c.HandleLLEN
@@ -232,6 +234,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 	case "LPOP":
 		handler = c.HandleLPOP
 		handler = c.MULTIMiddleware(handler)
+		handler = c.ReplicaMiddleware(handler)
 
 	case "BLPOP":
 		handler = c.HandleBLPOP
@@ -244,6 +247,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 	case "XADD":
 		handler = c.HandleXADD
 		handler = c.MULTIMiddleware(handler)
+		handler = c.ReplicaMiddleware(handler)
 
 	case "XRANGE":
 		handler = c.HandleXRANGE
@@ -256,6 +260,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 	case "INCR":
 		handler = c.HandleINCR
 		handler = c.MULTIMiddleware(handler)
+		handler = c.ReplicaMiddleware(handler)
 
 	case "MULTI":
 		handler = c.HandleMULTI
