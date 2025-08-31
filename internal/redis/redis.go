@@ -34,7 +34,8 @@ func NewController(opts Options) *Controller {
 		Level:     logrus.DebugLevel,
 	}
 	rep := ReplicationState{
-		Role: opts.Role,
+		Role:     opts.Role,
+		replicas: NewBLSet[replication.Replica](),
 	}
 	if opts.Role == replication.RoleMaster {
 		rep.MasterReplID = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
