@@ -80,6 +80,10 @@ func (e InputEntryID) IsZero() bool {
 	return e.timestampMS == nil && e.sequenceNum == nil
 }
 
+type SessionInfo struct {
+	Hash string
+}
+
 type Session struct {
 	Hash       string
 	RemoteAddr string

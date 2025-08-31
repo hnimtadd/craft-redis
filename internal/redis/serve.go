@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
+	"github.com/codecrafters-io/redis-starter-go/utils"
 )
 
 func (c *Controller) Serve(conn net.Conn) {
@@ -23,6 +24,9 @@ func (c *Controller) Serve(conn net.Conn) {
 		RemoteAddr: conn.RemoteAddr().String(),
 		Conn:       conn,
 	}
+	info := SessionInfo{
+		Hash: hash,
+	}
 	c.sessions.Set(hash, &session)
 	defer func() {
 		c.logger.Debug("cleaning connection ", remoteAddr)
@@ -32,6 +36,7 @@ func (c *Controller) Serve(conn net.Conn) {
 
 	parser := resp.Parser{}
 	for {
+		utils.Assert(conn != nil)
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -50,8 +55,9 @@ func (c *Controller) Serve(conn net.Conn) {
 		}
 		switch data := cmd.(type) {
 		case resp.ArraysData:
-			res := c.Handle(data, session)
+			res := c.Handle(data, info)
 
+			utils.Assert(conn != nil)
 			_, err := conn.Write([]byte(res.String()))
 			if err != nil {
 				fmt.Println("failed to write to conn", err)

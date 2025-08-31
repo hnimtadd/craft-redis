@@ -610,7 +610,7 @@ func (c *Controller) handleINCR(key resp.BulkStringData) (resp.Data, *resp.Simpl
 	return resp.Integer{Data: newValue}, nil
 }
 
-func (c *Controller) handleMULTI(session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleMULTI(session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if c.queue.Has(session.Hash) {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -629,7 +629,7 @@ func (c *Controller) handleMULTI(session Session) (resp.Data, *resp.SimpleErrorD
 	return resp.BulkStringData{Data: "OK"}, nil
 }
 
-func (c *Controller) handleEXEC(session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleEXEC(session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	queue, found := c.queue.Get(session.Hash)
 	if !found {
 		return nil, &resp.SimpleErrorData{
@@ -652,7 +652,7 @@ func (c *Controller) handleEXEC(session Session) (resp.Data, *resp.SimpleErrorDa
 	return result, nil
 }
 
-func (c *Controller) handleDISCARD(session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleDISCARD(session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	_, found := c.queue.Get(session.Hash)
 	if !found {
 		return nil, &resp.SimpleErrorData{
@@ -675,7 +675,14 @@ func (c *Controller) handleINFO(section resp.BulkStringData) (resp.Data, *resp.S
 	return resp.BulkStringData{Data: builder.String()}, nil
 }
 
-func (c *Controller) handleREPLCONF(conf replication.Config, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handleREPLCONF(conf replication.Config, sessionInfo SessionInfo) (resp.Data, *resp.SimpleErrorData) {
+	session, found := c.sessions.Get(sessionInfo.Hash)
+	if !found {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "session not found",
+		}
+	}
 	replica := replication.Replica{
 		Config:  conf,
 		Conn:    session.Conn,
@@ -685,7 +692,7 @@ func (c *Controller) handleREPLCONF(conf replication.Config, session Session) (r
 	return resp.BulkStringData{Data: "OK"}, nil
 }
 
-func (c *Controller) handlePSYNC(session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) handlePSYNC(session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	replica, found := c.replicationState.replicas.Get(session.Hash)
 	if !found {
 		return nil, &resp.SimpleErrorData{
@@ -693,16 +700,24 @@ func (c *Controller) handlePSYNC(session Session) (resp.Data, *resp.SimpleErrorD
 			Msg:  "replication config not found",
 		}
 	}
+	sesion, found := c.sessions.Get(session.Hash)
+	if !found {
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "session not found",
+		}
+	}
 	go func() {
 		time.Sleep(time.Second)
 		c.logger.Debug("sending rdb file")
-		resp, err := c.Send(session.Conn, rdb.EmptyFile)
+		err := c.AsyncSend(sesion.Conn, rdb.EmptyFile)
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
 			return
 		}
-		c.logger.Info("rdb file response", resp)
+		c.logger.Info("rdb file done")
 		replica.IsReady = true
+		c.logger.Info("con", sesion.Conn)
 	}()
 	return resp.SimpleStringData{Data: fmt.Sprintf("FULLRESYNC %s %d", c.replicationState.MasterReplID, c.replicationState.MasterReplOffset)}, nil
 }

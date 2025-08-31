@@ -130,7 +130,19 @@ func (c *Controller) connectToMaster() {
 	}
 }
 
+func (c *Controller) AsyncSend(conn net.Conn, data resp.Data) error {
+	utils.Assert(conn != nil)
+	c.logger.Debug("sending", resp.Raw(data), "to", conn.RemoteAddr())
+	dataBytes := []byte(data.String())
+	written, err := conn.Write(dataBytes)
+	if written != len(dataBytes) {
+		return fmt.Errorf("failed to write full command to connection")
+	}
+	return err
+}
+
 func (c *Controller) Send(conn net.Conn, data resp.Data) (resp.Data, error) {
+	utils.Assert(conn != nil)
 	c.logger.Debug("sending", resp.Raw(data), "to", conn.RemoteAddr())
 	dataBytes := []byte(data.String())
 	written, err := conn.Write(dataBytes)
@@ -151,44 +163,18 @@ func (c *Controller) Send(conn net.Conn, data resp.Data) (resp.Data, error) {
 }
 
 type (
-	HandlerFunc  func(command, Session) (resp.Data, *resp.SimpleErrorData)
+	HandlerFunc  func(command, SessionInfo) (resp.Data, *resp.SimpleErrorData)
 	QueueCommand struct {
 		handler HandlerFunc
 		cmd     command
-		session Session
+		session SessionInfo
 	}
 	Queue struct {
 		commands []QueueCommand
 	}
 )
 
-func (c *Controller) ReplicaMiddleware(next HandlerFunc) HandlerFunc {
-	return func(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
-		res, err := next(cmd, session)
-		if err != nil {
-			return res, err
-		}
-		go func() {
-			datas := make([]resp.Data, len(cmd.args)+1)
-			datas[0] = cmd.cmd
-			for idx, arg := range cmd.args {
-				datas[idx+1] = arg
-			}
-			fullCmd := resp.ArraysData{Datas: datas}
-			handler := func(sessionHash string, r *replication.Replica) bool {
-				if r.IsReady {
-					c.Send(r.Conn, fullCmd)
-				}
-				// returning true means we continue
-				return true
-			}
-			c.replicationState.replicas.ForEach(handler)
-		}()
-		return nil, nil
-	}
-}
-
-func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data {
+func (c *Controller) Handle(data resp.ArraysData, sessionInfo SessionInfo) resp.Data {
 	cmd, err := parse(data)
 	if err != nil {
 		return err
@@ -292,22 +278,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo Session) resp.Data
 	return res
 }
 
-func (c *Controller) MULTIMiddleware(next HandlerFunc) HandlerFunc {
-	return func(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
-		if !c.queue.Has(session.Hash) {
-			return next(cmd, session)
-		}
-		queue, _ := c.queue.Get(session.Hash)
-		queue.commands = append(queue.commands, QueueCommand{
-			handler: next,
-			cmd:     cmd,
-			session: session,
-		})
-		return resp.SimpleStringData{Data: "QUEUED"}, nil
-	}
-}
-
-func (c *Controller) HandleECHO(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleECHO(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) == 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -317,11 +288,11 @@ func (c *Controller) HandleECHO(cmd command, session Session) (resp.Data, *resp.
 	return cmd.args[0], nil
 }
 
-func (c *Controller) HandlePING(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandlePING(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	return resp.SimpleStringData{Data: "PONG"}, nil
 }
 
-func (c *Controller) HandleSET(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleSET(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -331,7 +302,7 @@ func (c *Controller) HandleSET(cmd command, session Session) (resp.Data, *resp.S
 	return c.handleSet(cmd.args[0], cmd.args[1], cmd.args[2:]...)
 }
 
-func (c *Controller) HandleGET(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleGET(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -341,7 +312,7 @@ func (c *Controller) HandleGET(cmd command, session Session) (resp.Data, *resp.S
 	return c.handleGet(cmd.args[0])
 }
 
-func (c *Controller) HandleRPUSH(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleRPUSH(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -351,7 +322,7 @@ func (c *Controller) HandleRPUSH(cmd command, session Session) (resp.Data, *resp
 	return c.handleRPUSH(cmd.args[0], cmd.args[1:]...)
 }
 
-func (c *Controller) HandleLRANGE(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLRANGE(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 3 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -378,7 +349,7 @@ func (c *Controller) HandleLRANGE(cmd command, session Session) (resp.Data, *res
 	return c.handleLRANGE(keyData, int(from), int(to))
 }
 
-func (c *Controller) HandleLPUSH(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLPUSH(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -388,7 +359,7 @@ func (c *Controller) HandleLPUSH(cmd command, session Session) (resp.Data, *resp
 	return c.handleLPUSH(cmd.args[0], cmd.args[1:]...)
 }
 
-func (c *Controller) HandleLLEN(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLLEN(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -398,7 +369,7 @@ func (c *Controller) HandleLLEN(cmd command, session Session) (resp.Data, *resp.
 	return c.handleLLEN(cmd.args[0])
 }
 
-func (c *Controller) HandleLPOP(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleLPOP(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) < 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -420,7 +391,7 @@ func (c *Controller) HandleLPOP(cmd command, session Session) (resp.Data, *resp.
 	return c.handleLPOP(cmd.args[0], numItem)
 }
 
-func (c *Controller) HandleBLPOP(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleBLPOP(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) < 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -446,7 +417,7 @@ func (c *Controller) HandleBLPOP(cmd command, session Session) (resp.Data, *resp
 	return c.handleBLPOP(keys, int64(timeoutInMs))
 }
 
-func (c *Controller) HandleTYPE(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleTYPE(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -458,7 +429,7 @@ func (c *Controller) HandleTYPE(cmd command, session Session) (resp.Data, *resp.
 
 // HandleXADD handles stream add entry command.
 // example: redis-cli XADD stream_key 1526919030474-0 temperature 36 humidity 95
-func (c *Controller) HandleXADD(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXADD(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) < 4 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -484,7 +455,7 @@ func (c *Controller) HandleXADD(cmd command, session Session) (resp.Data, *resp.
 
 // HandleXRANGE handles querying data from a stream.
 // example: redis-cli XRANGE stream_key 1526985054069 1526985054079
-func (c *Controller) HandleXRANGE(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXRANGE(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	// The sequence number doesn't need to be included in the start and end IDs
 	// provided to the command. If not provided, XRANGE defaults to a sequence
 	// number of 0 for the start and the maximum sequence number for the end.
@@ -539,7 +510,7 @@ func (c *Controller) HandleXRANGE(cmd command, session Session) (resp.Data, *res
 
 // HandleXREAD handles XREAD
 // example: redis-cli XREAD streams some_key 1526985054069-0
-func (c *Controller) HandleXREAD(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleXREAD(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	// we loop untils we got the "STREAMS"
 	var timeoutInMs *int64
 loop:
@@ -615,7 +586,7 @@ loop:
 
 // HandleINCR handles INCR
 // example: redis-cli INCR foo
-func (c *Controller) HandleINCR(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleINCR(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -633,7 +604,7 @@ func (c *Controller) HandleINCR(cmd command, session Session) (resp.Data, *resp.
 // QUEUED
 // > INCR foo
 // QUEUED
-func (c *Controller) HandleMULTI(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleMULTI(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -654,7 +625,7 @@ func (c *Controller) HandleMULTI(cmd command, session Session) (resp.Data, *resp
 // > EXEC
 // 1. OK
 // 2. 42
-func (c *Controller) HandleEXEC(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleEXEC(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -675,7 +646,7 @@ func (c *Controller) HandleEXEC(cmd command, session Session) (resp.Data, *resp.
 // > DISCARD
 // OK
 // . 42
-func (c *Controller) HandleDISCARD(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleDISCARD(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -685,7 +656,7 @@ func (c *Controller) HandleDISCARD(cmd command, session Session) (resp.Data, *re
 	return c.handleDISCARD(session)
 }
 
-func (c *Controller) HandleInfo(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleInfo(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 1 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -695,7 +666,7 @@ func (c *Controller) HandleInfo(cmd command, session Session) (resp.Data, *resp.
 	return c.handleINFO(cmd.args[0])
 }
 
-func (c *Controller) HandleREPLCONF(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandleREPLCONF(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	if len(cmd.args) != 2 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
@@ -717,6 +688,6 @@ func (c *Controller) HandleREPLCONF(cmd command, session Session) (resp.Data, *r
 	return c.handleREPLCONF(replicaConfig, session)
 }
 
-func (c *Controller) HandlePSYNC(cmd command, session Session) (resp.Data, *resp.SimpleErrorData) {
+func (c *Controller) HandlePSYNC(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
 	return c.handlePSYNC(session)
 }
