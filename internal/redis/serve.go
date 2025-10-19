@@ -10,15 +10,19 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/utils"
 )
 
-func (c *Controller) Serve(conn network.Connection) {
-	c.serve(conn, false)
+type ServeOption struct {
+	IsMasterConnection bool
 }
 
-func (c *Controller) ServeMasterConnection(conn network.Connection) {
-	c.serve(conn, true)
+func (c *Controller) Serve(conn network.Connection, opts ...ServeOption) {
+	opt := ServeOption{IsMasterConnection: false}
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	c.serve(conn, opt)
 }
 
-func (c *Controller) serve(conn network.Connection, isMasterConnection bool) {
+func (c *Controller) serve(conn network.Connection, opt ServeOption) {
 	innerConn := conn.Conn()
 	remoteAddr := innerConn.RemoteAddr().String()
 	localAdd := innerConn.LocalAddr().String()
@@ -31,11 +35,11 @@ func (c *Controller) serve(conn network.Connection, isMasterConnection bool) {
 		Hash:               hash,
 		RemoteAddr:         innerConn.RemoteAddr().String(),
 		Conn:               conn,
-		IsMasterConnection: isMasterConnection,
+		IsMasterConnection: opt.IsMasterConnection,
 	}
 	info := SessionInfo{
 		Hash:               hash,
-		IsMasterConnection: isMasterConnection,
+		IsMasterConnection: opt.IsMasterConnection,
 	}
 	c.sessions.Set(hash, &session)
 	defer func() {
@@ -61,7 +65,7 @@ func (c *Controller) serve(conn network.Connection, isMasterConnection bool) {
 
 			// Only send response if this is NOT a master connection
 			// (replicas don't respond to propagated commands from master)
-			if !isMasterConnection {
+			if !opt.IsMasterConnection {
 				utils.Assert(conn != nil)
 				err := conn.Write([]byte(res.String()))
 				if err != nil {

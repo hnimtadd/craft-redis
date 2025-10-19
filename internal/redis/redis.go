@@ -165,7 +165,7 @@ func (c *Controller) connectToMaster() {
 		}
 
 		c.logger.Info("Handshake done")
-		go c.ServeMasterConnection(conn)
+		go c.Serve(conn, ServeOption{IsMasterConnection: true})
 		return
 	}
 }
