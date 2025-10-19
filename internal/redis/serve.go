@@ -11,11 +11,19 @@ import (
 )
 
 type ServeOption struct {
-	IsMasterConnection bool
+	IsReplicationConnection bool
+}
+
+func AsMasterConnection() ServeOption {
+	return ServeOption{IsReplicationConnection: false}
+}
+
+func AsClientConnection() ServeOption {
+	return ServeOption{IsReplicationConnection: true}
 }
 
 func (c *Controller) Serve(conn network.Connection, opts ...ServeOption) {
-	opt := ServeOption{IsMasterConnection: false}
+	opt := ServeOption{IsReplicationConnection: true}
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
@@ -32,14 +40,14 @@ func (c *Controller) serve(conn network.Connection, opt ServeOption) {
 
 	c.logger.Debug("receive connection ", remoteAddr)
 	session := Session{
-		Hash:               hash,
-		RemoteAddr:         innerConn.RemoteAddr().String(),
-		Conn:               conn,
-		IsMasterConnection: opt.IsMasterConnection,
+		Hash:                 hash,
+		RemoteAddr:           innerConn.RemoteAddr().String(),
+		Conn:                 conn,
+		IsReplicationSession: opt.IsReplicationConnection,
 	}
 	info := SessionInfo{
-		Hash:               hash,
-		IsMasterConnection: opt.IsMasterConnection,
+		Hash:                 hash,
+		IsReplicationSession: opt.IsReplicationConnection,
 	}
 	c.sessions.Set(hash, &session)
 	defer func() {
@@ -65,7 +73,9 @@ func (c *Controller) serve(conn network.Connection, opt ServeOption) {
 
 			// Only send response if this is NOT a master connection
 			// (replicas don't respond to propagated commands from master)
-			if !opt.IsMasterConnection {
+			if opt.IsReplicationConnection {
+				fmt.Println("processed silently (master connection)")
+			} else {
 				utils.Assert(conn != nil)
 				err := conn.Write([]byte(res.String()))
 				if err != nil {
@@ -73,8 +83,6 @@ func (c *Controller) serve(conn network.Connection, opt ServeOption) {
 					return
 				}
 				fmt.Println("return", resp.Raw(res))
-			} else {
-				fmt.Println("processed silently (master connection)")
 			}
 		default:
 			fmt.Println("unsupported")

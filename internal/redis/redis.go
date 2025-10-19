@@ -165,7 +165,7 @@ func (c *Controller) connectToMaster() {
 		}
 
 		c.logger.Info("Handshake done")
-		go c.Serve(conn, ServeOption{IsMasterConnection: true})
+		go c.Serve(conn, AsMasterConnection())
 		return
 	}
 }
@@ -267,6 +267,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo SessionInfo) resp.
 
 	case "INFO":
 		handler = c.HandleInfo
+
 	case "REPLCONF":
 		handler = c.HandleREPLCONF
 
@@ -675,15 +676,22 @@ func (c *Controller) HandleInfo(cmd command, session SessionInfo) (resp.Data, *r
 }
 
 func (c *Controller) HandleREPLCONF(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
-	if len(cmd.args) != 2 {
+	if len(cmd.args) == 0 {
 		return nil, &resp.SimpleErrorData{
 			Type: resp.SimpleErrorTypeGeneric,
 			Msg:  "wrong number of arguments for 'replconf' command",
 		}
 	}
-	replicaConfig := replication.Config{}
 	switch strings.ToLower(cmd.args[0].Data) {
 	case "listening-port":
+		if len(cmd.args) != 2 {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "wrong number of arguments for 'replconf' command",
+			}
+		}
+
+		replicaConfig := replication.Config{}
 		port, err := strconv.ParseUint(cmd.args[1].Data, 10, 64)
 		if err != nil {
 			return nil, &resp.SimpleErrorData{
@@ -692,8 +700,30 @@ func (c *Controller) HandleREPLCONF(cmd command, session SessionInfo) (resp.Data
 			}
 		}
 		replicaConfig.ListeningPort = int(port)
+		return c.handleREPLCONF(replicaConfig, session)
+
+	case "getack":
+		if len(cmd.args) != 2 {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "wrong number of arguments for 'replconf' command",
+			}
+		}
+
+		return resp.ArraysData{
+			Datas: []resp.Data{
+				resp.BulkStringData{Data: "REPLCONF"},
+				resp.BulkStringData{Data: "ACK"},
+				resp.BulkStringData{Data: "0"},
+			},
+		}, nil
+
+	default:
+		return nil, &resp.SimpleErrorData{
+			Type: resp.SimpleErrorTypeGeneric,
+			Msg:  "unknown arguments in 'REPLCONF' command",
+		}
 	}
-	return c.handleREPLCONF(replicaConfig, session)
 }
 
 func (c *Controller) HandlePSYNC(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
