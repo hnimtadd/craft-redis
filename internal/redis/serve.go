@@ -10,27 +10,35 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/utils"
 )
 
-type ServeOption struct {
-	IsReplicationConnection bool
-}
-
-func AsMasterConnection() ServeOption {
-	return ServeOption{IsReplicationConnection: false}
-}
-
-func AsClientConnection() ServeOption {
-	return ServeOption{IsReplicationConnection: true}
-}
-
-func (c *Controller) Serve(conn network.Connection, opts ...ServeOption) {
-	opt := ServeOption{IsReplicationConnection: true}
-	if len(opts) > 0 {
-		opt = opts[0]
+type (
+	ServeOption  func(*serveOptions) *serveOptions
+	serveOptions struct {
+		IsReplicationConnection bool
 	}
-	c.serve(conn, opt)
+)
+
+var defaultOpts = serveOptions{
+	IsReplicationConnection: false,
 }
 
-func (c *Controller) serve(conn network.Connection, opt ServeOption) {
+func WithReplicationConnection(isReplication bool) ServeOption {
+	return func(opts *serveOptions) *serveOptions {
+		opts.IsReplicationConnection = isReplication
+		return opts
+	}
+}
+
+func (c *Controller) Serve(conn network.Connection, options ...ServeOption) {
+	option := &defaultOpts
+	if len(options) > 0 {
+		for _, opt := range options {
+			option = opt(option)
+		}
+	}
+	c.serve(conn, *option)
+}
+
+func (c *Controller) serve(conn network.Connection, opt serveOptions) {
 	innerConn := conn.Conn()
 	remoteAddr := innerConn.RemoteAddr().String()
 	localAdd := innerConn.LocalAddr().String()

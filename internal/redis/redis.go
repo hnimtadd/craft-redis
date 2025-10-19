@@ -165,7 +165,7 @@ func (c *Controller) connectToMaster() {
 		}
 
 		c.logger.Info("Handshake done")
-		go c.Serve(conn, AsMasterConnection())
+		go c.Serve(conn, WithReplicationConnection(true))
 		return
 	}
 }
@@ -701,6 +701,15 @@ func (c *Controller) HandleREPLCONF(cmd command, session SessionInfo) (resp.Data
 		}
 		replicaConfig.ListeningPort = int(port)
 		return c.handleREPLCONF(replicaConfig, session)
+	case "capa":
+		if len(cmd.args) != 2 {
+			return nil, &resp.SimpleErrorData{
+				Type: resp.SimpleErrorTypeGeneric,
+				Msg:  "wrong number of arguments for 'replconf' command",
+			}
+		}
+
+		return resp.BulkStringData{Data: "OK"}, nil
 
 	case "getack":
 		if len(cmd.args) != 2 {
