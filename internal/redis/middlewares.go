@@ -34,6 +34,7 @@ func (c *Controller) ReplicaMiddleware(next HandlerFunc) HandlerFunc {
 				if err != nil {
 					c.logger.Debug("failed to write to tcp connection", "err", err)
 				}
+				c.logger.Debug("sent")
 				// returning true means we continue
 				return true
 			}

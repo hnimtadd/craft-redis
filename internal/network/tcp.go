@@ -65,7 +65,7 @@ func (c *connectionImpl) WriteThenRead(b []byte) (response []byte, err error) {
 	if n != len(b) {
 		return nil, fmt.Errorf("expected %d to be written, actual: %d", len(b), n)
 	}
-	
+
 	ch := make(chan []byte, 1)
 	defer close(ch)
 	c.mu.Lock()
@@ -88,7 +88,7 @@ func (c *connectionImpl) Read() (resp []byte) {
 func (c *connectionImpl) readLoop() {
 	defer close(c.dataCh)
 	defer close(c.closeCh)
-	
+
 	for {
 		buff := make([]byte, 4096)
 		n, err := c.conn.Read(buff)
@@ -96,7 +96,7 @@ func (c *connectionImpl) readLoop() {
 			break
 		}
 		data := buff[:n]
-		
+
 		// Send to internal channel - blocks if buffer is full
 		select {
 		case c.dataCh <- data:
@@ -113,7 +113,7 @@ func (c *connectionImpl) dispatcher() {
 			if !ok {
 				return // dataCh closed, readLoop stopped
 			}
-			
+
 			// Block until we have a waiter for this data
 			var ch *chan []byte
 			for ch == nil {
@@ -128,9 +128,9 @@ func (c *connectionImpl) dispatcher() {
 				// No waiter yet, sleep briefly to avoid busy-waiting
 				time.Sleep(10 * time.Microsecond)
 			}
-			
+
 			*ch <- data // Send data to waiter
-			
+
 		case <-c.closeCh:
 			return
 		}
