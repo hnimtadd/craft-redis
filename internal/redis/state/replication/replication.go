@@ -1,6 +1,8 @@
 package replication
 
-import "net"
+import (
+	"github.com/codecrafters-io/redis-starter-go/internal/network"
+)
 
 type Role string
 
@@ -11,7 +13,7 @@ const (
 
 type Replica struct {
 	Config  Config
-	Conn    net.Conn
+	Conn    network.Connection
 	IsReady bool
 }
 

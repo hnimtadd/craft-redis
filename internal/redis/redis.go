@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/dsa"
+	"github.com/codecrafters-io/redis-starter-go/internal/network"
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/state/replication"
 	"github.com/codecrafters-io/redis-starter-go/utils"
@@ -15,10 +17,10 @@ import (
 )
 
 type Controller struct {
-	data     *Set[Value]
+	data     *dsa.Set[Value]
 	logger   *logrus.Logger
-	sessions *Set[Session]
-	queue    *Set[Queue]
+	sessions *dsa.Set[Session]
+	queue    *dsa.Set[Queue]
 
 	options Options
 
@@ -35,17 +37,17 @@ func NewController(opts Options) *Controller {
 	}
 	rep := ReplicationState{
 		Role:     opts.Role,
-		replicas: NewBLSet[replication.Replica](),
+		replicas: dsa.NewBLSet[replication.Replica](),
 	}
 	if opts.Role == replication.RoleMaster {
 		rep.MasterReplID = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
 		rep.MasterReplOffset = 0
 	}
 	return &Controller{
-		data:             NewBLSet[Value](),
+		data:             dsa.NewBLSet[Value](),
 		logger:           log,
-		sessions:         NewBLSet[Session](),
-		queue:            NewBLSet[Queue](),
+		sessions:         dsa.NewBLSet[Session](),
+		queue:            dsa.NewBLSet[Queue](),
 		options:          opts,
 		replicationState: &rep,
 	}
@@ -63,103 +65,109 @@ func (c *Controller) connectToMaster() {
 	masterAddr := fmt.Sprintf("%s:%v", c.options.MasterHost, c.options.MasterPort)
 	c.logger.Infof("Connecting to MASTER %s", masterAddr)
 	for range retry {
-		conn, err := net.Dial("tcp", masterAddr)
+		tcpConn, err := net.Dial("tcp", masterAddr)
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
 			continue
 		}
-		res, err := c.Send(conn, resp.ArraysData{
-			Datas: []resp.Data{resp.BulkStringData{Data: "PING"}},
-		})
-		if err != nil {
-			c.logger.Infof("Error condition on socket: %s", err)
-			conn.Close()
-			continue
+		conn := network.NewConn(tcpConn)
+		parser := resp.Parser{}
+		{
+			pingCmd := resp.ArraysData{
+				Datas: []resp.Data{resp.BulkStringData{Data: "PING"}},
+			}
+			respBytes, err := conn.WriteThenRead([]byte(pingCmd.String()))
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Info("Master replied to PING, replication can continue...")
+			cmd, _, err := parser.ParseNext(respBytes)
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Debug("received", resp.Raw(cmd))
 		}
-		c.logger.Info("Master replied to PING, replication can continue...")
-		c.logger.Debug("received", resp.Raw(res))
 
-		res, err = c.Send(conn, resp.ArraysData{
-			Datas: []resp.Data{
-				resp.BulkStringData{Data: "REPLCONF"},
-				resp.BulkStringData{Data: "listening-port"},
-				resp.BulkStringData{Data: fmt.Sprint(c.options.SlavePort)},
-			},
-		})
-		if err != nil {
-			c.logger.Infof("Error condition on socket: %s", err)
-			conn.Close()
-			continue
+		{
+			replConfCm := resp.ArraysData{
+				Datas: []resp.Data{
+					resp.BulkStringData{Data: "REPLCONF"},
+					resp.BulkStringData{Data: "listening-port"},
+					resp.BulkStringData{Data: fmt.Sprint(c.options.SlavePort)},
+				},
+			}
+			respBytes, err := conn.WriteThenRead([]byte(replConfCm.String()))
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Info("Master replied to 1st REPLCONF, replication can continue...")
+			cmd, _, err := parser.ParseNext(respBytes)
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Debug("received", resp.Raw(cmd))
 		}
-		c.logger.Info("Master replied to 1st REPLCONF, replication can continue...")
-		c.logger.Debug("received", resp.Raw(res))
 
-		res, err = c.Send(conn, resp.ArraysData{
-			Datas: []resp.Data{
-				resp.BulkStringData{Data: "REPLCONF"},
-				resp.BulkStringData{Data: "capa"},
-				resp.BulkStringData{Data: "psync2"},
-			},
-		})
-		if err != nil {
-			c.logger.Infof("Error condition on socket: %s", err)
-			conn.Close()
-			continue
+		{
+			replConfCmd := resp.ArraysData{
+				Datas: []resp.Data{
+					resp.BulkStringData{Data: "REPLCONF"},
+					resp.BulkStringData{Data: "capa"},
+					resp.BulkStringData{Data: "psync2"},
+				},
+			}
+			respBytes, err := conn.WriteThenRead([]byte(replConfCmd.String()))
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
+			cmd, _, err := parser.ParseNext(respBytes)
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Debug("received", resp.Raw(cmd))
 		}
-		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
-		c.logger.Debug("received", resp.Raw(res))
 
-		res, err = c.Send(conn, resp.ArraysData{
-			Datas: []resp.Data{
-				resp.BulkStringData{Data: "PSYNC"},
-				resp.BulkStringData{Data: "?"},
-				resp.BulkStringData{Data: "-1"},
-			},
-		})
-		if err != nil {
-			c.logger.Infof("Error condition on socket: %s", err)
-			conn.Close()
-			continue
+		{
+			psyncCmd := resp.ArraysData{
+				Datas: []resp.Data{
+					resp.BulkStringData{Data: "PSYNC"},
+					resp.BulkStringData{Data: "?"},
+					resp.BulkStringData{Data: "-1"},
+				},
+			}
+			respBytes, err := conn.WriteThenRead([]byte(psyncCmd.String()))
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Info("Master replied to PSYNC, replication can continue...")
+			cmd, _, err := parser.ParseNext(respBytes)
+			if err != nil {
+				c.logger.Infof("Error condition on socket: %s", err)
+				tcpConn.Close()
+				continue
+			}
+			c.logger.Debug("received", resp.Raw(cmd))
 		}
-		c.logger.Info("Master replied to 2nd REPLCONF, replication can continue...")
-		c.logger.Debug("received", resp.Raw(res))
 
 		c.logger.Info("Handshake done")
 		go c.Serve(conn)
 		return
 	}
-}
-
-func (c *Controller) AsyncSend(conn net.Conn, data resp.Data) error {
-	utils.Assert(conn != nil)
-	c.logger.Debug("sending", resp.Raw(data), "to", conn.RemoteAddr())
-	dataBytes := []byte(data.String())
-	written, err := conn.Write(dataBytes)
-	if written != len(dataBytes) {
-		return fmt.Errorf("failed to write full command to connection")
-	}
-	return err
-}
-
-func (c *Controller) Send(conn net.Conn, data resp.Data) (resp.Data, error) {
-	utils.Assert(conn != nil)
-	c.logger.Debug("sending", resp.Raw(data), "to", conn.RemoteAddr())
-	dataBytes := []byte(data.String())
-	written, err := conn.Write(dataBytes)
-	if written != len(dataBytes) {
-		return nil, fmt.Errorf("failed to write full command to connection")
-	}
-	if err != nil {
-		return nil, err
-	}
-	respBytes := make([]byte, 4096)
-	n, err := conn.Read(respBytes)
-	if err != nil {
-		return nil, err
-	}
-	parser := resp.Parser{}
-	cmd, _, err := parser.ParseNext(respBytes[:n])
-	return cmd, err
 }
 
 type (

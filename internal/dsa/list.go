@@ -1,9 +1,8 @@
-package redis
+package dsa
 
 import (
 	"container/list"
 	"errors"
-	"fmt"
 	"slices"
 	"sync"
 )
@@ -36,7 +35,6 @@ func (l *BLList[T]) get(idx uint) *list.Element {
 		rOffset = l.data.Len() - 1 - int(idx)
 		node    *list.Element
 	)
-	fmt.Println(lOffset, rOffset)
 
 	switch {
 	case rOffset < lOffset:

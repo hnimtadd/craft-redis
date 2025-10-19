@@ -710,7 +710,7 @@ func (c *Controller) handlePSYNC(session SessionInfo) (resp.Data, *resp.SimpleEr
 	go func() {
 		time.Sleep(time.Second)
 		c.logger.Debug("sending rdb file")
-		err := c.AsyncSend(sesion.Conn, rdb.EmptyFile)
+		err := sesion.Conn.Write([]byte(rdb.EmptyFile.String()))
 		if err != nil {
 			c.logger.Infof("Error condition on socket: %s", err)
 			return

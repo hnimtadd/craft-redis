@@ -1,4 +1,4 @@
-package redis
+package dsa
 
 import (
 	"sync"
@@ -58,7 +58,7 @@ func (s *Set[T]) Has(key string) bool {
 	return found
 }
 
-func (s *Set[T]) ForEach(handler func(string, *T) bool) {
+func (s *Set[T]) ForEach(handler func(key string, value *T) (shouldStop bool)) {
 	s.data.Range(func(key, value any) bool {
 		keyStr, ok := key.(string)
 		if !ok {

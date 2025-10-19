@@ -2,9 +2,10 @@ package redis
 
 import (
 	"fmt"
-	"net"
 	"time"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/dsa"
+	"github.com/codecrafters-io/redis-starter-go/internal/network"
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
 )
 
@@ -24,19 +25,19 @@ type (
 		isExpired bool
 	}
 	SetValueList struct {
-		*BLList[resp.BulkStringData]
+		*dsa.BLList[resp.BulkStringData]
 	}
 	SetValueStream struct {
-		*BLList[StreamEntry]
+		*dsa.BLList[StreamEntry]
 	}
 )
 
 func NewListValue() *SetValueList {
-	return &SetValueList{NewBLList[resp.BulkStringData]()}
+	return &SetValueList{dsa.NewBLList[resp.BulkStringData]()}
 }
 
 func NewStreamValue() *SetValueStream {
-	return &SetValueStream{NewBLList[StreamEntry]()}
+	return &SetValueStream{dsa.NewBLList[StreamEntry]()}
 }
 
 type StreamEntry struct {
@@ -87,5 +88,5 @@ type SessionInfo struct {
 type Session struct {
 	Hash       string
 	RemoteAddr string
-	Conn       net.Conn
+	Conn       network.Connection
 }

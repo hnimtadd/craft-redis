@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/network"
 	"github.com/codecrafters-io/redis-starter-go/internal/redis"
 	"github.com/sirupsen/logrus"
 )
@@ -51,7 +52,7 @@ func (s *Server) ListenAndServe() error {
 		}
 	}()
 	for conn := range conns {
-		go s.handler.Serve(conn)
+		go s.handler.Serve(network.NewConn(conn))
 	}
 	return net.ErrClosed
 }

@@ -117,7 +117,7 @@ func fullfillStreamEntryID(stream *SetValueStream, id InputEntryID) (EntryID, *r
 			timestampMS = ptr(now)
 		}
 	default:
-		last := stream.At(stream.Len() - 1)
+		last := stream.Last()
 
 		lastTimestampMS, lastSequenceNum := last.ID.timestampMS, last.ID.sequenceNum
 		// if the current top ID in the stream has a time greater than the current

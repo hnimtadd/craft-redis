@@ -19,7 +19,7 @@ func (c *Controller) ReplicaMiddleware(next HandlerFunc) HandlerFunc {
 				datas[idx+1] = arg
 			}
 			fullCmd := resp.ArraysData{Datas: datas}
-			handler := func(sessionHash string, r *replication.Replica) bool {
+			handler := func(sessionHash string, r *replication.Replica) (shouldStop bool) {
 				c.logger.Debug("propagating to " + sessionHash)
 				if !r.IsReady {
 					c.logger.Debug("replicate is not ready, skipping")
@@ -30,7 +30,10 @@ func (c *Controller) ReplicaMiddleware(next HandlerFunc) HandlerFunc {
 					c.logger.Debug("connection is nil, skipping...")
 					return true
 				}
-				c.Send(r.Conn, fullCmd)
+				_, err := r.Conn.WriteThenRead([]byte(fullCmd.String()))
+				if err != nil {
+					c.logger.Debug("failed to write to tcp connection", "err", err)
+				}
 				// returning true means we continue
 				return true
 			}
