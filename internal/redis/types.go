@@ -82,11 +82,13 @@ func (e InputEntryID) IsZero() bool {
 }
 
 type SessionInfo struct {
-	Hash string
+	Hash                 string
+	IsMasterConnection   bool // True if this is a replica receiving commands from master
 }
 
 type Session struct {
-	Hash       string
-	RemoteAddr string
-	Conn       network.Connection
+	Hash                 string
+	RemoteAddr           string
+	Conn                 network.Connection
+	IsMasterConnection   bool // True if this is a replica receiving commands from master
 }

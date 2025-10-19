@@ -30,7 +30,8 @@ func (c *Controller) ReplicaMiddleware(next HandlerFunc) HandlerFunc {
 					c.logger.Debug("connection is nil, skipping...")
 					return true
 				}
-				_, err := r.Conn.WriteThenRead([]byte(fullCmd.String()))
+				// Use Write instead of WriteThenRead - replicas don't respond to propagated commands
+				err := r.Conn.Write([]byte(fullCmd.String()))
 				if err != nil {
 					c.logger.Debug("failed to write to tcp connection", "err", err)
 				}

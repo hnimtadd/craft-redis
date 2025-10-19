@@ -11,6 +11,14 @@ import (
 )
 
 func (c *Controller) Serve(conn network.Connection) {
+	c.serve(conn, false)
+}
+
+func (c *Controller) ServeMasterConnection(conn network.Connection) {
+	c.serve(conn, true)
+}
+
+func (c *Controller) serve(conn network.Connection, isMasterConnection bool) {
 	innerConn := conn.Conn()
 	remoteAddr := innerConn.RemoteAddr().String()
 	localAdd := innerConn.LocalAddr().String()
@@ -20,12 +28,14 @@ func (c *Controller) Serve(conn network.Connection) {
 
 	c.logger.Debug("receive connection ", remoteAddr)
 	session := Session{
-		Hash:       hash,
-		RemoteAddr: innerConn.RemoteAddr().String(),
-		Conn:       conn,
+		Hash:               hash,
+		RemoteAddr:         innerConn.RemoteAddr().String(),
+		Conn:               conn,
+		IsMasterConnection: isMasterConnection,
 	}
 	info := SessionInfo{
-		Hash: hash,
+		Hash:               hash,
+		IsMasterConnection: isMasterConnection,
 	}
 	c.sessions.Set(hash, &session)
 	defer func() {
@@ -49,13 +59,19 @@ func (c *Controller) Serve(conn network.Connection) {
 		case resp.ArraysData:
 			res := c.Handle(data, info)
 
-			utils.Assert(conn != nil)
-			err := conn.Write([]byte(res.String()))
-			if err != nil {
-				fmt.Println("failed to write to conn", err)
-				return
+			// Only send response if this is NOT a master connection
+			// (replicas don't respond to propagated commands from master)
+			if !isMasterConnection {
+				utils.Assert(conn != nil)
+				err := conn.Write([]byte(res.String()))
+				if err != nil {
+					fmt.Println("failed to write to conn", err)
+					return
+				}
+				fmt.Println("return", resp.Raw(res))
+			} else {
+				fmt.Println("processed silently (master connection)")
 			}
-			fmt.Println("return", resp.Raw(res))
 		default:
 			fmt.Println("unsupported")
 		}
