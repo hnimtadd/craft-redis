@@ -1,6 +1,8 @@
 package redis
 
 import (
+	"strings"
+
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/resp"
 	"github.com/codecrafters-io/redis-starter-go/internal/redis/state/replication"
 )
@@ -57,5 +59,28 @@ func (c *Controller) MULTIMiddleware(next HandlerFunc) HandlerFunc {
 			session: session,
 		})
 		return resp.SimpleStringData{Data: "QUEUED"}, nil
+	}
+}
+
+// ReplicationConnectionMiddleware detect if the command should be return or could be silently ignore.
+func (c *Controller) ReplicationConnectionMiddleware(next HandlerFunc) HandlerFunc {
+	return func(cmd command, session SessionInfo) (resp.Data, *resp.SimpleErrorData) {
+		res, err := next(cmd, session)
+		if session.IsReplicationSession {
+			if err != nil {
+				return nil, err
+			}
+			if (strings.ToUpper(cmd.cmd.Data) == "REPLCONFG") &&
+				len(cmd.args) == 2 &&
+				strings.ToUpper(cmd.args[0].Data) == "GETACK" {
+				return res, nil
+			}
+			return nil, nil
+		}
+
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
 	}
 }

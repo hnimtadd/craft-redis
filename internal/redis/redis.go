@@ -280,6 +280,7 @@ func (c *Controller) Handle(data resp.ArraysData, sessionInfo SessionInfo) resp.
 			Msg:  fmt.Sprintf("unknown command '%s'", cmd.cmd.Data),
 		}
 	}
+	handler = c.ReplicationConnectionMiddleware(handler)
 	res, err := handler(*cmd, sessionInfo)
 	if err != nil {
 		return err

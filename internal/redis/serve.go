@@ -78,12 +78,7 @@ func (c *Controller) serve(conn network.Connection, opt serveOptions) {
 		switch data := cmd.(type) {
 		case resp.ArraysData:
 			res := c.Handle(data, info)
-
-			// Only send response if this is NOT a master connection
-			// (replicas don't respond to propagated commands from master)
-			if opt.IsReplicationConnection {
-				fmt.Println("processed silently (master connection)")
-			} else {
+			if res != nil {
 				utils.Assert(conn != nil)
 				err := conn.Write([]byte(res.String()))
 				if err != nil {
@@ -92,6 +87,7 @@ func (c *Controller) serve(conn network.Connection, opt serveOptions) {
 				}
 				fmt.Println("return", resp.Raw(res))
 			}
+
 		default:
 			fmt.Println("unsupported")
 		}
